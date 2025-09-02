@@ -1,3 +1,4 @@
+````markdown
 # Cattle Detection & Recognition System
 
 A comprehensive machine learning pipeline for cattle detection and recognition using various deep learning architectures including Faster R-CNN, YOLOv8, and Ultralytics YOLO.
@@ -17,17 +18,26 @@ project1/
 ├──
 ├── data/                  # 📁 Raw data (if any)
 ├── dataset/               # 📊 Dataset files
-│   └── cattleface/        # Cattle face dataset
-│       ├── CowfaceImage/  # Original images
-│       └── Annotation/    # Annotation files
+│   ├── cattleface/        # Cattle face dataset
+│   │   ├── CowfaceImage/  # Original images
+│   │   └── Annotation/    # Annotation files
+│   └── cattlebody/        # Cattle body dataset
 ├── processed_data/        # 🔄 Processed dataset
-│   └── cattleface/        # Train/Val/Test splits
+│   ├── cattleface/        # Face detection splits
+│   │   ├── train/
+│   │   ├── val/
+│   │   └── test/
+│   └── cattlebody/        # Body detection splits
 │       ├── train/
 │       ├── val/
 │       └── test/
 ├──
 ├── src/                   # 💻 Source code
-│   ├── config.py          # Main configuration
+│   ├── config/            # Configuration modules
+│   │   ├── __init__.py
+│   │   ├── settings.py    # Main configuration
+│   │   ├── paths.py       # Path configurations
+│   │   └── hyperparameters.py # Training hyperparameters
 │   ├── models/            # 🧠 Model architectures
 │   │   ├── faster_rcnn.py
 │   │   ├── yolov8.py
@@ -38,28 +48,35 @@ project1/
 │   │   ├── train_ultralytics.py
 │   │   └── utils.py
 │   ├── evaluation/        # 📈 Evaluation scripts
-│   │   ├── evaluate.py
+│   │   ├── evaluate_model.py
 │   │   └── metrics.py
+│   ├── processing/        # Data processing
+│   │   ├── preprocessing.py
+│   │   └── dataset.py
 │   ├── utils/             # 🛠️ Utility functions
 │   │   ├── data_validation.py
 │   │   ├── logging_utils.py
 │   │   ├── model_validation.py
-│   │   └── ... (many more utilities)
-│   ├── scripts/           # 📜 Additional scripts
-│   │   ├── train_all.py
-│   │   ├── evaluate_all.py
-│   │   └── inference.py
-│   └── examples/          # 💡 Example usage
-│       └── test_model.py
+│   │   └── memory.py
+│   └── scripts/           # 📜 Additional scripts
+│       ├── train_all.py
+│       ├── evaluate_all.py
+│       └── inference.py
 ├──
-└── outputs/               # 📤 All outputs organized here
-    ├── models/            # Trained model weights
-    │   ├── faster_rcnn/
-    │   ├── yolov8/
-    │   └── ultralytics/
-    ├── logs/              # Training and execution logs
-    ├── images/            # Generated images/visualizations
-    └── results/           # Training results and metrics
+└── outputs/               # 📤 All outputs organized by dataset/model
+    ├── {dataset}/         # Dataset-specific outputs
+    │   └── {model}/       # Model-specific outputs
+    │       ├── models/    # Trained model weights
+    │       ├── logs/      # Training and execution logs
+    │       ├── metrics/   # Evaluation metrics (JSON + TXT)
+    │       ├── images/    # Generated images/visualizations
+    │       ├── results/   # Training results
+    │       └── checkpoints/ # Model checkpoints
+    └── legacy/            # Legacy output structure
+        ├── models/
+        ├── logs/
+        ├── images/
+        └── results/
 ```
 
 ## 🚀 Quick Start
@@ -70,115 +87,367 @@ project1/
 pip install -r requirements.txt
 ```
 
-### 2. Run the Application
+### 2. Interactive Menu
 
 ```bash
 python main.py
-
-python main.py train --model faster_rcnn --dataset cattlebody --epochs 10 --batch-size 8
 ```
 
-This will launch an interactive menu where you can:
+This launches an interactive menu for all operations.
 
-- ✅ Train different models (Faster R-CNN, YOLOv8, Ultralytics)
-- ✅ Run model evaluation
-- ✅ Visualize results
-- ✅ Run debug tests
-- ✅ View project structure
+## 📊 Data Processing
 
-## 🎯 Available Training Options
+### Preprocess Datasets
 
-### 1. Faster R-CNN
+```bash
+# Preprocess cattle face dataset
+python main.py preprocess --dataset cattleface --split-ratio 0.8
 
-- **Description**: Faster R-CNN with ResNet-50 backbone for object detection
-- **Module**: `src/training/train_faster_rcnn.py`
-- **Output**: `outputs/models/faster_rcnn/`
+# Preprocess cattle body dataset
+python main.py preprocess --dataset cattlebody --split-ratio 0.8
 
-### 2. YOLOv8
+# Custom split ratios
+python main.py preprocess --dataset cattleface --split-ratio 0.7 --val-ratio 0.15 --test-ratio 0.15
+```
 
-- **Description**: YOLOv8 model for real-time object detection
-- **Module**: `src/training/train_yolov8.py`
-- **Output**: `outputs/models/yolov8/`
+### Available Datasets
 
-### 3. Ultralytics YOLO
+- **cattleface**: Cattle face detection dataset
+- **cattlebody**: Cattle body detection dataset
 
-- **Description**: Ultralytics YOLO implementation
-- **Module**: `src/training/train_ultralytics.py`
-- **Output**: `outputs/models/ultralytics/`
+## 🎯 Model Training
 
-## 📊 Dataset
+### Available Models
 
-The project works with cattle face detection datasets:
+| Model         | Description                          | Best For                |
+| ------------- | ------------------------------------ | ----------------------- |
+| `faster_rcnn` | Faster R-CNN with ResNet-50 backbone | High accuracy detection |
+| `yolov8`      | YOLOv8 model                         | Real-time detection     |
+| `ultralytics` | Ultralytics YOLO implementation      | Balanced speed/accuracy |
 
-- **Location**: `dataset/cattleface/`
-- **Processed Data**: `processed_data/cattleface/`
-- **Splits**: train/val/test
+### Training Commands
 
-## 🎛️ Configuration
+#### Faster R-CNN
 
-All paths and settings are centralized in `src/config.py`:
+```bash
+# Basic training
+python main.py train --model faster_rcnn --dataset cattlebody
 
-- Output directories
-- Dataset paths
-- Training configurations
-- Hyperparameters
+# Full training with custom parameters
+python main.py train
+    --model faster_rcnn
+    --dataset cattlebody
+    --epochs 50
+    --batch-size 8
+    --learning-rate 0.001
+    --device cuda
+
+# Quick test training
+python main.py train --model faster_rcnn --dataset cattlebody --epochs 1 --batch-size 2
+```
+
+#### YOLOv8
+
+```bash
+# Basic training
+python main.py train --model yolov8 --dataset cattlebody
+
+# Advanced training
+python main.py train
+    --model yolov8
+    --dataset cattlebody
+    --epochs 100
+    --batch-size 16
+    --learning-rate 0.01
+    --device cuda
+
+# Multiple datasets
+python main.py train --model yolov8 --dataset cattleface --epochs 50
+```
+
+#### Ultralytics YOLO
+
+```bash
+# Basic training
+python main.py train --model ultralytics --dataset cattlebody
+
+# Production training
+python main.py train
+    --model ultralytics
+    --dataset cattlebody
+    --epochs 200
+    --batch-size 32
+    --learning-rate 0.01
+    --device cuda
+```
+
+### Training Output Structure
+
+```
+outputs/
+└── {dataset}/              # e.g., cattlebody/
+    └── {model}/            # e.g., faster_rcnn/
+        ├── models/
+        │   ├── faster_rcnn.pth     # Main model
+        │   └── best_model.pth      # Best checkpoint
+        ├── logs/
+        │   └── faster_rcnn_cattlebody.log
+        ├── metrics/
+        │   ├── metrics_epoch_1.json    # Detailed metrics
+        │   ├── metrics_epoch_1.txt     # Human-readable summary
+        │   └── final_metrics.json
+        ├── images/         # Training visualizations
+        ├── results/        # Training curves, plots
+        └── checkpoints/    # Model checkpoints
+```
+
+## 📈 Model Evaluation
+
+### Comprehensive Evaluation
+
+```bash
+# Evaluate specific model on specific dataset
+python main.py evaluate --model faster_rcnn --dataset cattlebody
+
+# Evaluate with custom parameters
+python main.py evaluate
+    --model faster_rcnn
+    --dataset cattlebody
+    --batch-size 4
+    --score-threshold 0.7
+
+# Standalone evaluation script
+python src/evaluation/evaluate_model.py
+    --model outputs/cattlebody/faster_rcnn/models/faster_rcnn.pth
+    --dataset cattlebody
+    --output-dir outputs/cattlebody/faster_rcnn/evaluation/
+```
+
+### Evaluation Metrics
+
+The system provides comprehensive metrics:
+
+- **mAP@0.5**: Mean Average Precision at IoU 0.5
+- **mAP@0.75**: Mean Average Precision at IoU 0.75
+- **mAP@0.5:0.95**: COCO-style mAP across IoU thresholds
+- **Precision**: True Positives / (True Positives + False Positives)
+- **Recall**: True Positives / (True Positives + False Negatives)
+- **F1-Score**: Harmonic mean of precision and recall
+
+### Example Evaluation Output
+
+```
+============================================================
+DETECTION METRICS SUMMARY
+============================================================
+📊 Dataset Statistics:
+   • Images evaluated: 714
+   • Total predictions: 714
+   • Total ground truths: 714
+   • Score threshold: 0.50
+
+🎯 Average Precision (AP) Metrics:
+   • mAP@0.5      : 0.7209
+   • mAP@0.75     : 0.5142
+   • mAP@0.5:0.95 : 0.4331
+
+📈 Classification Metrics @ IoU 0.5:
+   • Precision    : 0.8519
+   • Recall       : 0.7493
+   • F1-Score     : 0.7973
+
+🔍 Per-Class Metrics @ IoU 0.5:
+   • Cattle  : AP=0.7209, P=0.8519, R=0.7493, F1=0.7973
+============================================================
+```
+
+## 🎨 Visualization and Inference
+
+```bash
+# Visualize results
+python main.py visualize --model faster_rcnn --dataset cattlebody
+
+# Run inference on images
+python main.py visualize --model faster_rcnn --input path/to/images/
+```
+
+## 🔍 Advanced Usage
+
+### Batch Processing
+
+```bash
+# Train all models on all datasets
+python src/scripts/train_all.py
+
+# Evaluate all models
+python src/scripts/evaluate_all.py
+```
+
+### Custom Dataset Processing
+
+```bash
+# Process new dataset
+python main.py preprocess
+    --dataset custom_dataset
+    --split-ratio 0.8
+    --images-dir path/to/images
+    --labels-dir path/to/labels
+```
+
+### Multi-GPU Training
+
+```bash
+# Use specific GPU
+python main.py train --model faster_rcnn --dataset cattlebody --device cuda:0
+
+# Automatic GPU selection
+python main.py train --model faster_rcnn --dataset cattlebody --device auto
+```
+
+## 📋 Training Recipes
+
+### Quick Prototyping
+
+```bash
+# Fast iteration for development
+python main.py train --model faster_rcnn --dataset cattlebody --epochs 1 --batch-size 2
+```
+
+### Production Training
+
+```bash
+# High-quality model training
+python main.py train
+    --model faster_rcnn
+    --dataset cattlebody
+    --epochs 100
+    --batch-size 16
+    --learning-rate 0.001
+    --device cuda
+```
+
+### Comparative Training
+
+```bash
+# Train same dataset with different models
+python main.py train --model faster_rcnn --dataset cattlebody --epochs 50
+python main.py train --model yolov8 --dataset cattlebody --epochs 50
+python main.py train --model ultralytics --dataset cattlebody --epochs 50
+
+# Compare results
+python main.py evaluate --model faster_rcnn --dataset cattlebody
+python main.py evaluate --model yolov8 --dataset cattlebody
+python main.py evaluate --model ultralytics --dataset cattlebody
+```
+
+## 🛠️ Configuration
+
+### Hyperparameter Files
+
+- **Faster R-CNN**: `src/config/hyperparameters.py` → `FASTER_RCNN_PARAMS`
+- **YOLOv8**: `src/config/hyperparameters.py` → `YOLOV8_PARAMS`
+- **Ultralytics**: `src/config/hyperparameters.py` → `ULTRALYTICS_PARAMS`
+
+### Output Configuration
+
+```python
+# Systematic output structure: outputs/{dataset}/{model}/{type}/
+get_systematic_output_dir("cattlebody", "faster_rcnn", "models")
+# Returns: outputs/cattlebody/faster_rcnn/models/
+```
 
 ## 📝 Logging
 
-All activities are logged:
+All activities are comprehensively logged:
 
-- **Main Log**: `outputs/logs/main.log`
-- **Training Logs**: `outputs/logs/{model_name}.log`
-- **Evaluation Logs**: `outputs/logs/evaluation.log`
+```
+outputs/{dataset}/{model}/logs/{model}_{dataset}.log
+```
+
+Example log locations:
+
+- `outputs/cattlebody/faster_rcnn/logs/faster_rcnn_cattlebody.log`
+- `outputs/cattleface/yolov8/logs/yolov8_cattleface.log`
+
+## 🐛 Debug and Testing
+
+### Debug Commands
+
+```bash
+# Run debug tests
+python main.py debug
+
+# Debug specific components
+python src/utils/data_validation.py
+python src/utils/model_validation.py
+```
+
+### Memory Management
+
+```bash
+# Monitor GPU memory during training
+python main.py train --model faster_rcnn --dataset cattlebody --monitor-memory
+
+# Force garbage collection
+python main.py train --model faster_rcnn --dataset cattlebody --clean-memory
+```
+
+## 📊 Performance Benchmarks
+
+### Expected Training Times (RTX 3080)
+
+| Model        | Dataset    | Epochs | Batch Size | Time per Epoch | Total Time |
+| ------------ | ---------- | ------ | ---------- | -------------- | ---------- |
+| Faster R-CNN | cattlebody | 50     | 8          | ~4 min         | ~3.3 hours |
+| YOLOv8       | cattlebody | 100    | 16         | ~2 min         | ~3.3 hours |
+| Ultralytics  | cattlebody | 200    | 32         | ~1 min         | ~3.3 hours |
+
+### Expected Performance Metrics
+
+| Model        | Dataset    | mAP@0.5    | mAP@0.5:0.95 | FPS     |
+| ------------ | ---------- | ---------- | ------------ | ------- |
+| Faster R-CNN | cattlebody | ~0.75-0.85 | ~0.45-0.55   | ~15-25  |
+| YOLOv8       | cattlebody | ~0.70-0.80 | ~0.40-0.50   | ~50-100 |
+| Ultralytics  | cattlebody | ~0.72-0.82 | ~0.42-0.52   | ~60-120 |
 
 ## 🔧 Development
 
 ### Adding New Models
 
-1. Create model architecture in `src/models/`
-2. Create training script in `src/training/`
-3. Add configuration to `src/config.py`
-4. The main menu will automatically include it
+1. Create model architecture in `src/models/new_model.py`
+2. Create training script in `src/training/train_new_model.py`
+3. Add configuration to `src/config/settings.py`:
 
-### Customizing Outputs
-
-All outputs are saved to the `outputs/` directory:
-
-- Models: `outputs/models/`
-- Logs: `outputs/logs/`
-- Images: `outputs/images/`
-- Results: `outputs/results/`
-
-## 🐛 Debug and Testing
-
-Run debug tests through the main menu or directly:
-
-```bash
-python src/run_debug_sample.py
+```python
+TRAINING_CONFIGS = {
+    # ... existing configs
+    "new_model": {
+        "name": "New Model",
+        "description": "Description of new model",
+        "module": "src.training.train_new_model",
+    }
+}
 ```
 
-## 📈 Evaluation
+4. The system will automatically recognize it!
 
-Evaluate trained models through the main menu or directly:
+### Adding New Datasets
 
-```bash
-python src/evaluation/evaluate.py
-```
-
-## 🎨 Visualization
-
-Generate visualizations through the main menu or directly:
+1. Place dataset in `dataset/new_dataset/`
+2. Update preprocessing script if needed
+3. Run preprocessing:
 
 ```bash
-python src/scripts/inference.py
+python main.py preprocess --dataset new_dataset
 ```
 
 ## 🤝 Contributing
 
 1. Keep all source code in `src/`
-2. All outputs go to `outputs/`
-3. Update `src/config.py` for new paths
-4. Add new training options to `TRAINING_CONFIGS`
+2. All outputs follow the pattern: `outputs/{dataset}/{model}/{type}/`
+3. Update configurations in `src/config/`
+4. Add comprehensive logging
+5. Include evaluation metrics
 
 ## 📄 License
 
@@ -186,19 +455,85 @@ python src/scripts/inference.py
 
 ## 🆘 Troubleshooting
 
-### Common Issues:
+### Common Issues
 
-1. **Import Errors**: Make sure you're running from the project root
-2. **Permission Errors**: Check file permissions in the project directory
-3. **Missing Dependencies**: Run `pip install -r requirements.txt`
-4. **Path Issues**: All paths are configured in `src/config.py`
+#### Import Errors
 
-### Getting Help:
+```bash
+# Make sure you're in the project root
+cd /path/to/project1
+python main.py
+```
 
-- Check logs in `outputs/logs/`
-- Run debug tests via main menu
-- Verify project structure via main menu
+#### Memory Issues
+
+```bash
+# Reduce batch size
+python main.py train --model faster_rcnn --dataset cattlebody --batch-size 2
+
+# Use CPU if GPU memory is insufficient
+python main.py train --model faster_rcnn --dataset cattlebody --device cpu
+```
+
+#### Dataset Issues
+
+```bash
+# Validate dataset structure
+python src/utils/data_validation.py --dataset cattlebody
+
+# Reprocess dataset
+python main.py preprocess --dataset cattlebody --force-reprocess
+```
+
+#### Model Loading Issues
+
+```bash
+# Check if model exists
+ls outputs/cattlebody/faster_rcnn/models/
+
+# Retrain if model is corrupted
+python main.py train --model faster_rcnn --dataset cattlebody --epochs 1
+```
+
+### Getting Help
+
+1. **Check logs**: Look in `outputs/{dataset}/{model}/logs/`
+2. **Run debug tests**: `python main.py debug`
+3. **Validate data**: `python src/utils/data_validation.py`
+4. **Check memory**: `python src/utils/memory.py`
+5. **Verify paths**: `python main.py --show-structure`
+
+### Performance Tips
+
+1. **GPU Training**: Always use `--device cuda` for faster training
+2. **Batch Size**: Adjust based on GPU memory (start with 8, reduce if needed)
+3. **Data Loading**: Use SSD storage for faster data loading
+4. **Mixed Precision**: Automatically enabled for compatible GPUs
+5. **Monitoring**: Check `outputs/{dataset}/{model}/metrics/` for progress
 
 ---
 
 **Happy Training! 🐄🤖**
+
+## 📚 Quick Reference Commands
+
+```bash
+# Complete workflow
+python main.py preprocess --dataset cattlebody
+python main.py train --model faster_rcnn --dataset cattlebody --epochs 50
+python main.py evaluate --model faster_rcnn --dataset cattlebody
+python main.py visualize --model faster_rcnn --dataset cattlebody
+
+# All models on one dataset
+python main.py train --model faster_rcnn --dataset cattlebody --epochs 20
+python main.py train --model yolov8 --dataset cattlebody --epochs 20
+python main.py train --model ultralytics --dataset cattlebody --epochs 20
+
+# One model on all datasets
+python main.py train --model faster_rcnn --dataset cattlebody --epochs 20
+python main.py train --model faster_rcnn --dataset cattleface --epochs 20
+
+# Production ready
+python main.py train --model faster_rcnn --dataset cattlebody --epochs 100 --batch-size 16
+```
+````
