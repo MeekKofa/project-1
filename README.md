@@ -95,7 +95,200 @@ python main.py
 
 This launches an interactive menu for all operations.
 
-## 📊 Data Processing
+## � Command Reference
+
+The system provides several commands with both short and long aliases for convenience:
+
+### 📋 All Available Commands
+
+| Command          | Description                 | Key Features                                          |
+| ---------------- | --------------------------- | ----------------------------------------------------- |
+| `train`          | Train a model               | Basic training with customizable parameters           |
+| `train-advanced` | Advanced training           | Optimized profiles, augmentation, early stopping      |
+| `evaluate`       | Evaluate a trained model    | Comprehensive metrics and analysis                    |
+| `preprocess`     | Preprocess datasets         | Split data into train/val/test sets                   |
+| `optimize`       | Hyperparameter optimization | Automated parameter tuning                            |
+| `cleanup`        | Clean old metric files      | Remove individual epoch files, keep consolidated data |
+| `info`           | Show system information     | List models, datasets, and project structure          |
+
+### 🏷️ Argument Aliases (Short Forms)
+
+For faster command entry, you can use short aliases:
+
+| Long Form           | Short | Description               | Example Values                               |
+| ------------------- | ----- | ------------------------- | -------------------------------------------- |
+| `--model`           | `-m`  | Model architecture        | `faster_rcnn`, `yolov8`, `ultralytics`       |
+| `--dataset`         | `-d`  | Dataset name              | `cattlebody`, `cattleface`                   |
+| `--epochs`          | `-e`  | Number of training epochs | `50`, `100`, `200`                           |
+| `--batch-size`      | `-b`  | Training batch size       | `2`, `4`, `8`, `16`                          |
+| `--learning-rate`   | `-lr` | Learning rate             | `0.001`, `0.002`, `0.01`                     |
+| `--score-threshold` | `-t`  | Confidence threshold      | `0.5`, `0.7`, `0.8`                          |
+| `--output-dir`      | `-o`  | Output directory          | `./custom_output/`                           |
+| `--model-path`      | `-p`  | Specific model path       | `outputs/model.pth`                          |
+| `--split-ratio`     | `-s`  | Train/val split ratio     | `0.7`, `0.8`, `0.9`                          |
+| `--force`           | `-f`  | Force operation           | Used with cleanup/preprocess                 |
+| `--profile`         | `-pr` | Training profile          | `default`, `high_precision`, `fast_training` |
+| `--trials`          | `-tr` | Optimization trials       | `10`, `20`, `50`                             |
+| `--max-epochs`      | `-me` | Maximum epochs            | `100`, `200`, `300`                          |
+| `--augmentation`    | `-a`  | Enable data augmentation  | Boolean flag                                 |
+| `--early-stopping`  | `-es` | Enable early stopping     | Boolean flag                                 |
+
+### 📝 Command Examples with Explanations
+
+#### 1. **Train Command** - `python main.py train`
+
+Basic training with customizable parameters:
+
+```bash
+# Basic training (uses default parameters)
+python main.py train -m faster_rcnn -d cattlebody
+
+# Customized training with explanations:
+python main.py train \
+    -m faster_rcnn \          # Use Faster R-CNN model
+    -d cattlebody \           # Train on cattle body dataset
+    -e 100 \                  # Train for 100 epochs
+    -b 4 \                    # Use batch size of 4
+    -lr 0.002 \               # Set learning rate to 0.002
+    --device cuda             # Use GPU for training
+```
+
+#### 2. **Train-Advanced Command** - `python main.py train-advanced`
+
+Advanced training with optimization features:
+
+```bash
+# High precision training (recommended for best results)
+python main.py train-advanced \
+    -m faster_rcnn \          # Use Faster R-CNN model
+    -d cattlebody \           # Train on cattle body dataset
+    -pr high_precision \      # Use high precision profile
+    -a \                      # Enable data augmentation
+    -es \                     # Enable early stopping
+    -me 300                   # Maximum 300 epochs
+
+# Quick training for experiments
+python main.py train-advanced -m faster_rcnn -d cattlebody -pr fast_training -me 50
+```
+
+#### 3. **Evaluate Command** - `python main.py evaluate`
+
+Comprehensive model evaluation:
+
+```bash
+# Basic evaluation
+python main.py evaluate -m faster_rcnn -d cattlebody
+
+# Custom evaluation with specific parameters
+python main.py evaluate \
+    -m faster_rcnn \          # Evaluate Faster R-CNN model
+    -d cattlebody \           # Use cattle body test set
+    -b 4 \                    # Batch size 4 for evaluation
+    -t 0.7 \                  # Confidence threshold 0.7
+    -o ./custom_eval/         # Save results to custom directory
+```
+
+#### 4. **Preprocess Command** - `python main.py preprocess`
+
+Data preprocessing and splitting:
+
+```bash
+# Basic preprocessing (80% train, 20% val)
+python main.py preprocess -d cattlebody
+
+# Custom split ratio
+python main.py preprocess \
+    -d cattlebody \           # Process cattle body dataset
+    -s 0.7 \                  # 70% for training, 30% for val/test
+    -f                        # Force reprocess even if exists
+```
+
+#### 5. **Optimize Command** - `python main.py optimize`
+
+Hyperparameter optimization:
+
+```bash
+# Basic hyperparameter optimization
+python main.py optimize -m faster_rcnn -d cattlebody
+
+# Advanced optimization
+python main.py optimize \
+    -m faster_rcnn \          # Optimize Faster R-CNN
+    -d cattlebody \           # Use cattle body dataset
+    -pr high_precision \      # Use high precision profile
+    -tr 20 \                  # Run 20 optimization trials
+    -me 100                   # Max 100 epochs per trial
+```
+
+#### 6. **Cleanup Command** - `python main.py cleanup`
+
+Clean up old metric files:
+
+```bash
+# Clean all metrics directories (dry run first)
+python main.py cleanup --all --dry-run
+
+# Actually clean up (removes individual epoch files)
+python main.py cleanup --all -f
+
+# Clean specific directory
+python main.py cleanup --dir outputs/cattlebody/faster_rcnn/metrics/
+```
+
+#### 7. **Info Command** - `python main.py info`
+
+System information and help:
+
+```bash
+# List available models and datasets
+python main.py info -l
+
+# Show project structure
+python main.py info -s
+
+# Show both
+python main.py info -l -s
+```
+
+### 🎯 Recommended Workflows
+
+#### **For Best Results (Recommended)**
+
+```bash
+# 1. Preprocess data
+python main.py preprocess -d cattlebody -s 0.8
+
+# 2. Train with advanced features
+python main.py train-advanced -m faster_rcnn -d cattlebody -pr high_precision -a -es -me 300
+
+# 3. Evaluate the model
+python main.py evaluate -m faster_rcnn -d cattlebody -t 0.5
+
+# 4. Clean up old files
+python main.py cleanup --all -f
+```
+
+#### **For Quick Experiments**
+
+```bash
+# Quick training test
+python main.py train -m faster_rcnn -d cattlebody -e 10 -b 2
+
+# Quick evaluation
+python main.py evaluate -m faster_rcnn -d cattlebody
+```
+
+#### **For Hyperparameter Tuning**
+
+```bash
+# Run optimization to find best parameters
+python main.py optimize -m faster_rcnn -d cattlebody -tr 10
+
+# Train with optimized parameters (check logs for best params)
+python main.py train-advanced -m faster_rcnn -d cattlebody -pr high_precision
+```
+
+## �📊 Data Processing
 
 ### Preprocess Datasets
 
@@ -236,6 +429,115 @@ DETECTION METRICS SUMMARY
 ============================================================
 ```
 
+## 🚀 Performance Optimization
+
+### Performance Analysis Tool
+
+The system includes a powerful performance optimization script that analyzes your current results and provides actionable recommendations:
+
+```bash
+# Analyze current performance and get recommendations
+python src/scripts/optimize_performance.py --current-map 0.6744 --target-map 0.8
+
+# Get hyperparameter suggestions
+python src/scripts/optimize_performance.py --current-map 0.6744 --suggest-hyperparams --model faster_rcnn
+
+# Analyze results from output directory
+python src/scripts/optimize_performance.py --analyze-results outputs/cattlebody/faster_rcnn/metrics/
+```
+
+### Performance Improvement Strategies
+
+Based on your current performance, the system provides specific recommendations:
+
+| Performance Level         | Current mAP | Recommended Actions                                                               | Expected Improvement |
+| ------------------------- | ----------- | --------------------------------------------------------------------------------- | -------------------- |
+| 🔴 Poor (0-30%)           | < 0.30      | • Review data quality<br>• Increase training epochs<br>• Check model architecture | +15-20% mAP          |
+| 🟠 Below Average (30-50%) | 0.30-0.50   | • Hyperparameter tuning<br>• Data augmentation<br>• Longer training               | +10-15% mAP          |
+| 🟡 Average (50-70%)       | 0.50-0.70   | • Advanced training profiles<br>• Optimization techniques<br>• Fine-tuning        | +5-10% mAP           |
+| 🟢 Good (70-85%)          | 0.70-0.85   | • Ensemble methods<br>• Architecture optimization<br>• Edge case handling         | +3-5% mAP            |
+| 🟢 Excellent (85%+)       | > 0.85      | • Model efficiency<br>• Inference optimization<br>• Production deployment         | Maintain performance |
+
+### Optimization Commands by Performance Level
+
+#### For mAP 50-70% (Your Current Range: 67.44%)
+
+```bash
+# Recommended: Advanced training with high precision profile
+python main.py train-advanced -m faster_rcnn -d cattlebody -pr high_precision -a -es -me 300
+
+# Alternative: Optimized basic training
+python main.py train -m faster_rcnn -d cattlebody -e 200 -b 4 -lr 0.002
+
+# Hyperparameter optimization
+python main.py optimize -m faster_rcnn -d cattlebody -pr high_precision -tr 10
+```
+
+#### For mAP 30-50% (Needs Major Improvement)
+
+```bash
+# Aggressive optimization
+python main.py train-advanced -m faster_rcnn -d cattlebody -pr high_precision -a -es -me 500
+
+# Multiple optimization trials
+python main.py optimize -m faster_rcnn -d cattlebody -tr 20 -me 200
+```
+
+#### For mAP 70%+ (Fine-tuning)
+
+```bash
+# Fine-tuning with careful parameters
+python main.py train -m faster_rcnn -d cattlebody -e 100 -b 8 -lr 0.001
+
+# Ensemble approach (train multiple models)
+python main.py train-advanced -m faster_rcnn -d cattlebody -pr high_precision
+python main.py train-advanced -m yolov8 -d cattlebody -pr high_precision
+```
+
+### Metrics Tracking and Analysis
+
+The enhanced metrics system provides:
+
+```bash
+# View consolidated metrics
+cat outputs/cattlebody/faster_rcnn/metrics/training_metrics.csv
+
+# Enhanced final report with recommendations
+cat outputs/cattlebody/faster_rcnn/metrics/enhanced_evaluation_report.txt
+
+# Training curves visualization (automatically generated)
+ls outputs/cattlebody/faster_rcnn/metrics/training_curves.png
+```
+
+### Performance Troubleshooting
+
+| Issue                | Symptoms                  | Solution Commands                                                      |
+| -------------------- | ------------------------- | ---------------------------------------------------------------------- |
+| **Overfitting**      | Training acc ↑, val acc ↓ | `python main.py train-advanced -m faster_rcnn -d cattlebody -es -a`    |
+| **Underfitting**     | Both train/val acc low    | `python main.py train -m faster_rcnn -d cattlebody -e 300 -lr 0.005`   |
+| **Slow Convergence** | mAP plateaued early       | `python main.py train -m faster_rcnn -d cattlebody -lr 0.002 -b 4`     |
+| **Memory Issues**    | CUDA out of memory        | `python main.py train -m faster_rcnn -d cattlebody -b 2 --device auto` |
+| **Poor Precision**   | High false positives      | `python main.py evaluate -m faster_rcnn -d cattlebody -t 0.7`          |
+| **Poor Recall**      | Missing detections        | `python main.py evaluate -m faster_rcnn -d cattlebody -t 0.3`          |
+
+### Expected Performance Timeline
+
+Based on your current 67.44% mAP, here's what to expect:
+
+```
+Week 1: Quick Improvements (67% → 72%)
+• python main.py train -m faster_rcnn -d cattlebody -e 200 -b 4 -lr 0.002
+• Expected: +5% mAP improvement
+
+Week 2: Advanced Optimization (72% → 78%)
+• python main.py train-advanced -m faster_rcnn -d cattlebody -pr high_precision -a -es
+• Expected: +6% mAP improvement
+
+Week 3: Fine-tuning (78% → 80%+)
+• python main.py optimize -m faster_rcnn -d cattlebody -tr 10
+• Expected: +2-3% mAP improvement to reach target
+```
+
 ## 🎨 Visualization and Inference
 
 ```bash
@@ -296,7 +598,6 @@ python main.py train -m faster_rcnn -d cattlebody -e 100 -b 16 -lr 0.001
 ```
 
     --device cuda
-
 ````
 
 ### Comparative Training
@@ -311,7 +612,7 @@ python main.py train -m ultralytics -d cattlebody -e 50
 python main.py evaluate -m faster_rcnn -d cattlebody
 python main.py evaluate -m yolov8 -d cattlebody
 python main.py evaluate -m ultralytics -d cattlebody
-````
+```
 
 ### 🎯 Short Argument Aliases
 
@@ -544,4 +845,7 @@ python main.py train -m faster_rcnn -d cattleface -e 20
 # Production ready
 python main.py train -m faster_rcnn -d cattlebody -e 100 -b 16
 ```
-````
+
+```
+
+```
