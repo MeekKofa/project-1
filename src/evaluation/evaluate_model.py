@@ -98,19 +98,19 @@ def create_dataloader(images_dir: str, labels_dir: str, batch_size: int = 4):
 def main():
     parser = argparse.ArgumentParser(
         description='Evaluate cattle detection models')
-    parser.add_argument('--model', type=str, required=True,
+    parser.add_argument('-m', '--model', type=str, required=True,
                         help='Path to the trained model checkpoint')
-    parser.add_argument('--dataset', type=str, required=True,
+    parser.add_argument('-d', '--dataset', type=str, required=True,
                         help='Dataset name (e.g., cattlebody, cattleface)')
-    parser.add_argument('--images', type=str,
+    parser.add_argument('-i', '--images', type=str,
                         help='Path to images directory (overrides dataset)')
-    parser.add_argument('--labels', type=str,
+    parser.add_argument('-l', '--labels', type=str,
                         help='Path to labels directory (overrides dataset)')
-    parser.add_argument('--batch-size', type=int, default=4,
+    parser.add_argument('-b', '--batch-size', type=int, default=4,
                         help='Batch size for evaluation')
-    parser.add_argument('--score-threshold', type=float, default=0.5,
+    parser.add_argument('-t', '--score-threshold', type=float, default=0.5,
                         help='Minimum confidence score threshold')
-    parser.add_argument('--output-dir', type=str, default='./outputs/evaluation',
+    parser.add_argument('-o', '--output-dir', type=str, default='./outputs/evaluation',
                         help='Directory to save evaluation results')
     parser.add_argument('--device', type=str, default='auto',
                         help='Device to use (cuda/cpu/auto)')

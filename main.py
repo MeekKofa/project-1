@@ -384,6 +384,208 @@ project/
     print(structure)
 
 
+def cleanup_metrics(args: argparse.Namespace, logger: logging.Logger) -> bool:
+    """
+    Clean up old individual epoch metric files.
+
+    Args:
+        args: Command line arguments
+        logger: Logger instance
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        from src.evaluation.metrics import DetectionMetrics
+        from pathlib import Path
+
+        if args.dir:
+            # Clean specific directory
+            metrics_dir = Path(args.dir)
+            if not metrics_dir.exists():
+                logger.error(f"Directory not found: {metrics_dir}")
+                return False
+
+            logger.info(f"🧹 Cleaning metrics directory: {metrics_dir}")
+            DetectionMetrics.cleanup_old_metrics(str(metrics_dir))
+
+        elif args.all:
+            # Clean all metrics directories
+            outputs_dir = Path('outputs')
+            if not outputs_dir.exists():
+                logger.error("Outputs directory not found")
+                return False
+
+            # Confirmation for non-dry-run operations
+            if not args.dry_run and not args.force:
+                response = input(
+                    "\n⚠️  This will remove individual epoch files from ALL metrics directories. Continue? [y/N]: ")
+                if response.lower() not in ['y', 'yes']:
+                    logger.info("Operation cancelled by user")
+                    return True
+
+            metrics_dirs = []
+
+            # Find all metrics directories
+            for dataset_dir in outputs_dir.iterdir():
+                if dataset_dir.is_dir() and dataset_dir.name != 'legacy':
+                    for model_dir in dataset_dir.iterdir():
+                        if model_dir.is_dir():
+                            metrics_dir = model_dir / 'metrics'
+                            if metrics_dir.exists():
+                                metrics_dirs.append(metrics_dir)
+
+            if not metrics_dirs:
+                logger.info("No metrics directories found to clean")
+                return True
+
+            logger.info(
+                f"🧹 Found {len(metrics_dirs)} metrics directories to clean")
+
+            total_removed = 0
+            for metrics_dir in metrics_dirs:
+                logger.info(
+                    f"Cleaning: {metrics_dir.relative_to(outputs_dir)}")
+
+                if args.dry_run:
+                    # Count files that would be removed
+                    count = 0
+                    for file_path in metrics_dir.iterdir():
+                        if file_path.is_file():
+                            filename = file_path.name
+                            if 'epoch_' in filename and (filename.endswith('.json') or filename.endswith('.txt')):
+                                if not any(pattern in filename for pattern in ['.csv', 'final', 'training_curves']):
+                                    count += 1
+                    logger.info(
+                        f"Would remove {count} files from {metrics_dir.relative_to(outputs_dir)}")
+                    total_removed += count
+                else:
+                    DetectionMetrics.cleanup_old_metrics(str(metrics_dir))
+
+            if args.dry_run:
+                logger.info(
+                    f"🔍 Dry run complete: Would remove {total_removed} files total")
+                logger.info("💡 Run without --dry-run to actually remove files")
+            else:
+                logger.info("🎉 Metrics cleanup completed for all directories!")
+                logger.info(
+                    "📊 Consolidated metrics are available in training_metrics.csv files")
+
+        else:
+            logger.error("Must specify either --dir or --all")
+            return False
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Cleanup failed: {e}")
+        return False
+
+
+def run_hyperparameter_optimization(args: argparse.Namespace, logger: logging.Logger) -> bool:
+    """Run hyperparameter optimization."""
+    try:
+        from src.config.hyperparameters import get_hyperparameters
+
+        logger.info(
+            f"Starting hyperparameter optimization for {args.model} on {args.dataset}")
+        logger.info(
+            f"Profile: {args.profile}, Trials: {args.trials}, Max epochs per trial: {args.max_epochs}")
+
+        # Get the specified hyperparameter profile
+        hyperparams = get_hyperparameters(args.model, args.profile)
+        logger.info(f"Base hyperparameters: {hyperparams}")
+
+        # For now, we'll use the profile-based training
+        # In the future, this could integrate with optuna or similar
+
+        # Import the appropriate training function
+        if args.model == 'faster_rcnn':
+            from src.training.train_faster_rcnn import train_faster_rcnn as train_func
+        elif args.model == 'yolov8':
+            from src.training.train_yolov8 import train_yolov8 as train_func
+        else:
+            logger.error(
+                f"Optimization not implemented for model: {args.model}")
+            return False
+
+        # Run training with optimized hyperparameters
+        success = train_func(
+            dataset_name=args.dataset,
+            **hyperparams,
+            num_epochs=args.max_epochs
+        )
+
+        if success:
+            logger.info(
+                "✅ Hyperparameter optimization completed successfully!")
+            logger.info("Check outputs directory for results and metrics")
+        else:
+            logger.error("❌ Hyperparameter optimization failed")
+
+        return success
+
+    except Exception as e:
+        logger.error(f"Error during hyperparameter optimization: {e}")
+        return False
+
+
+def run_advanced_training(args: argparse.Namespace, logger: logging.Logger) -> bool:
+    """Run advanced training with optimizations."""
+    try:
+        from src.config.hyperparameters import get_hyperparameters, DATA_AUG_PARAMS, OPTIMIZATION_PARAMS
+
+        logger.info(
+            f"Starting advanced training for {args.model} on {args.dataset}")
+        logger.info(f"Profile: {args.profile}")
+
+        # Get hyperparameters for the specified profile
+        hyperparams = get_hyperparameters(args.model, args.profile)
+
+        # Add advanced features if enabled
+        if args.augmentation:
+            logger.info("🔄 Advanced data augmentation enabled")
+            hyperparams.update(DATA_AUG_PARAMS)
+
+        if args.early_stopping:
+            logger.info("⏹️  Early stopping enabled")
+            hyperparams.update(OPTIMIZATION_PARAMS)
+
+        # Override max epochs
+        hyperparams['num_epochs'] = args.max_epochs
+
+        logger.info(f"Training configuration: {hyperparams}")
+
+        # Import the appropriate training function
+        if args.model == 'faster_rcnn':
+            from src.training.train_faster_rcnn import train_faster_rcnn as train_func
+        elif args.model == 'yolov8':
+            from src.training.train_yolov8 import train_yolov8 as train_func
+        else:
+            logger.error(
+                f"Advanced training not implemented for model: {args.model}")
+            return False
+
+        # Run training with advanced configuration
+        success = train_func(
+            dataset_name=args.dataset,
+            **hyperparams
+        )
+
+        if success:
+            logger.info("✅ Advanced training completed successfully!")
+            logger.info(
+                "📊 Check outputs directory for detailed metrics and results")
+        else:
+            logger.error("❌ Advanced training failed")
+
+        return success
+
+    except Exception as e:
+        logger.error(f"Error during advanced training: {e}")
+        return False
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create command-line argument parser."""
     parser = argparse.ArgumentParser(
@@ -405,43 +607,43 @@ Examples:
 
     # Train command
     train_parser = subparsers.add_parser('train', help='Train a model')
-    train_parser.add_argument('--model', required=True, choices=list(TRAINING_CONFIGS.keys()),
+    train_parser.add_argument('-m', '--model', required=True, choices=list(TRAINING_CONFIGS.keys()),
                               help='Model to train')
-    train_parser.add_argument('--dataset', required=True, choices=list(get_available_datasets().keys()),
+    train_parser.add_argument('-d', '--dataset', required=True, choices=list(get_available_datasets().keys()),
                               help='Dataset to use')
-    train_parser.add_argument('--epochs', type=int,
+    train_parser.add_argument('-e', '--epochs', type=int,
                               help='Number of training epochs')
-    train_parser.add_argument('--batch-size', type=int,
+    train_parser.add_argument('-b', '--batch-size', type=int,
                               help='Batch size for training')
     train_parser.add_argument(
-        '--learning-rate', type=float, help='Learning rate')
+        '-lr', '--learning-rate', type=float, help='Learning rate')
     train_parser.add_argument('--device', choices=['cpu', 'cuda', 'auto'], default='auto',
                               help='Device to use for training')
 
     # Evaluate command
     eval_parser = subparsers.add_parser(
         'evaluate', help='Evaluate a trained model')
-    eval_parser.add_argument('--model', required=True, choices=list(TRAINING_CONFIGS.keys()),
+    eval_parser.add_argument('-m', '--model', required=True, choices=list(TRAINING_CONFIGS.keys()),
                              help='Model to evaluate')
-    eval_parser.add_argument('--dataset', required=True, choices=list(get_available_datasets().keys()),
+    eval_parser.add_argument('-d', '--dataset', required=True, choices=list(get_available_datasets().keys()),
                              help='Dataset to evaluate on')
-    eval_parser.add_argument('--batch-size', type=int, default=4,
+    eval_parser.add_argument('-b', '--batch-size', type=int, default=4,
                              help='Batch size for evaluation')
-    eval_parser.add_argument('--score-threshold', type=float, default=0.5,
+    eval_parser.add_argument('-t', '--score-threshold', type=float, default=0.5,
                              help='Minimum confidence score threshold')
-    eval_parser.add_argument('--model-path', type=str,
+    eval_parser.add_argument('-p', '--model-path', type=str,
                              help='Path to specific model checkpoint (overrides default)')
-    eval_parser.add_argument('--output-dir', type=str,
+    eval_parser.add_argument('-o', '--output-dir', type=str,
                              help='Directory to save evaluation results')
 
     # Preprocess command
     preprocess_parser = subparsers.add_parser(
         'preprocess', help='Preprocess raw datasets for training')
-    preprocess_parser.add_argument('--dataset', required=True, choices=list(get_available_datasets().keys()),
+    preprocess_parser.add_argument('-d', '--dataset', required=True, choices=list(get_available_datasets().keys()),
                                    help='Dataset to preprocess')
-    preprocess_parser.add_argument('--split-ratio', type=float, default=0.8,
+    preprocess_parser.add_argument('-s', '--split-ratio', type=float, default=0.8,
                                    help='Train/validation split ratio (default: 0.8)')
-    preprocess_parser.add_argument('--force', action='store_true',
+    preprocess_parser.add_argument('-f', '--force', action='store_true',
                                    help='Force reprocessing even if output exists')
 
     # Visualize command
@@ -451,12 +653,54 @@ Examples:
     # Debug command
     debug_parser = subparsers.add_parser('debug', help='Run debug tests')
 
+    # Hyperparameter optimization command
+    hyperparam_parser = subparsers.add_parser(
+        'optimize', help='Run hyperparameter optimization')
+    hyperparam_parser.add_argument('-m', '--model', required=True, choices=list(TRAINING_CONFIGS.keys()),
+                                   help='Model to optimize')
+    hyperparam_parser.add_argument('-d', '--dataset', required=True, choices=list(get_available_datasets().keys()),
+                                   help='Dataset to use for optimization')
+    hyperparam_parser.add_argument('-pr', '--profile', choices=['default', 'high_precision', 'fast_training'],
+                                   default='default', help='Hyperparameter profile to use')
+    hyperparam_parser.add_argument('-tr', '--trials', type=int, default=10,
+                                   help='Number of optimization trials')
+    hyperparam_parser.add_argument('-me', '--max-epochs', type=int, default=50,
+                                   help='Maximum epochs per trial')
+
+    # Advanced training command
+    advanced_parser = subparsers.add_parser(
+        'train-advanced', help='Advanced training with optimization')
+    advanced_parser.add_argument('-m', '--model', required=True, choices=list(TRAINING_CONFIGS.keys()),
+                                 help='Model to train')
+    advanced_parser.add_argument('-d', '--dataset', required=True, choices=list(get_available_datasets().keys()),
+                                 help='Dataset to use')
+    advanced_parser.add_argument('-pr', '--profile', choices=['default', 'high_precision', 'fast_training'],
+                                 default='default', help='Training profile')
+    advanced_parser.add_argument('-a', '--augmentation', action='store_true',
+                                 help='Enable advanced data augmentation')
+    advanced_parser.add_argument('-es', '--early-stopping', action='store_true',
+                                 help='Enable early stopping')
+    advanced_parser.add_argument('-me', '--max-epochs', type=int, default=200,
+                                 help='Maximum training epochs')
+
     # Info command
     info_parser = subparsers.add_parser('info', help='Show system information')
     info_parser.add_argument(
-        '--list-models', action='store_true', help='List available models and datasets')
+        '-l', '--list-models', action='store_true', help='List available models and datasets')
     info_parser.add_argument(
-        '--show-structure', action='store_true', help='Show project structure')
+        '-s', '--show-structure', action='store_true', help='Show project structure')
+
+    # Cleanup command
+    cleanup_parser = subparsers.add_parser(
+        'cleanup', help='Clean up old metric files')
+    cleanup_parser.add_argument('--dir', type=str,
+                                help='Specific metrics directory to clean')
+    cleanup_parser.add_argument('--all', action='store_true',
+                                help='Clean all metrics directories')
+    cleanup_parser.add_argument('--dry-run', action='store_true',
+                                help='Show what would be deleted without deleting')
+    cleanup_parser.add_argument('-f', '--force', action='store_true',
+                                help='Skip confirmation prompts')
 
     # Global options
     parser.add_argument('--verbose', '-v', action='store_true',
@@ -500,9 +744,21 @@ def main():
             success = run_debug(args, logger)
             return 0 if success else 1
 
+        elif args.command == 'optimize':
+            success = run_hyperparameter_optimization(args, logger)
+            return 0 if success else 1
+
+        elif args.command == 'train-advanced':
+            success = run_advanced_training(args, logger)
+            return 0 if success else 1
+
         elif args.command == 'info':
             show_info(args, logger)
             return 0
+
+        elif args.command == 'cleanup':
+            success = cleanup_metrics(args, logger)
+            return 0 if success else 1
 
         else:
             parser.print_help()

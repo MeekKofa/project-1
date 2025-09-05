@@ -11,8 +11,167 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
+import csv
+import pandas as pd
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+
+class MetricsTracker:
+    """
+    CSV-based metrics tracker for consolidating training/evaluation metrics.
+    Saves only essential metrics to CSV for trend analysis.
+    """
+
+    def __init__(self, csv_path: str):
+        """Initialize metrics tracker with CSV file path."""
+        self.csv_path = Path(csv_path)
+        self.csv_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Initialize CSV with headers if it doesn't exist
+        if not self.csv_path.exists():
+            self.initialize_csv()
+
+    def initialize_csv(self):
+        """Initialize CSV file with headers."""
+        headers = [
+            'timestamp', 'epoch', 'split', 'mAP@0.5', 'mAP@0.75', 'mAP@0.5:0.95',
+            'precision@0.5', 'recall@0.5', 'f1@0.5', 'num_predictions', 'num_ground_truths',
+            'score_threshold', 'model_type', 'dataset', 'notes'
+        ]
+
+        with open(self.csv_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+
+        logger.info(f"Initialized metrics CSV at {self.csv_path}")
+
+    def log_metrics(self,
+                    metrics: Dict,
+                    epoch: int = None,
+                    split: str = 'val',
+                    model_type: str = '',
+                    dataset: str = '',
+                    notes: str = ''):
+        """
+        Log metrics to CSV file.
+
+        Args:
+            metrics: Dictionary containing metrics results
+            epoch: Training epoch number (None for final evaluation)
+            split: Data split (train/val/test)
+            model_type: Model type (faster_rcnn, yolov8, etc.)
+            dataset: Dataset name
+            notes: Additional notes
+        """
+        summary = metrics.get('summary', {})
+
+        row = [
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            epoch if epoch is not None else 'final',
+            split,
+            summary.get('mAP@0.5', 0),
+            summary.get('mAP@0.75', 0),
+            summary.get('mAP@0.5:0.95', 0),
+            summary.get('precision@0.5', 0),
+            summary.get('recall@0.5', 0),
+            summary.get('f1@0.5', 0),
+            summary.get('num_predictions', 0),
+            summary.get('num_ground_truths', 0),
+            summary.get('score_threshold', 0.5),
+            model_type,
+            dataset,
+            notes
+        ]
+
+        with open(self.csv_path, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(row)
+
+        if epoch is not None:
+            logger.info(f"Logged epoch {epoch} metrics to {self.csv_path}")
+        else:
+            logger.info(f"Logged final evaluation metrics to {self.csv_path}")
+
+    def get_training_history(self) -> List[Dict]:
+        """Get training history from CSV file."""
+        if not self.csv_path.exists():
+            return []
+
+        history = []
+        with open(self.csv_path, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                history.append(row)
+
+        return history
+
+    def plot_training_curves(self, save_path: str = None):
+        """Plot training curves from CSV data."""
+        history = self.get_training_history()
+        if not history:
+            logger.warning("No training history found for plotting")
+            return
+
+        # Filter only training epochs (not 'final')
+        train_history = [row for row in history if row['epoch']
+                         != 'final' and row['epoch'].isdigit()]
+
+        if not train_history:
+            logger.warning("No epoch data found for plotting")
+            return
+
+        # Extract data for plotting
+        epochs = [int(row['epoch']) for row in train_history]
+        map50 = [float(row['mAP@0.5']) for row in train_history]
+        precision = [float(row['precision@0.5']) for row in train_history]
+        recall = [float(row['recall@0.5']) for row in train_history]
+        f1 = [float(row['f1@0.5']) for row in train_history]
+
+        # Create subplots
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
+
+        # mAP@0.5
+        ax1.plot(epochs, map50, 'b-', linewidth=2, marker='o')
+        ax1.set_title('mAP@0.5 Over Training', fontsize=12, fontweight='bold')
+        ax1.set_xlabel('Epoch')
+        ax1.set_ylabel('mAP@0.5')
+        ax1.grid(True, alpha=0.3)
+
+        # Precision
+        ax2.plot(epochs, precision, 'g-', linewidth=2, marker='s')
+        ax2.set_title('Precision@0.5 Over Training',
+                      fontsize=12, fontweight='bold')
+        ax2.set_xlabel('Epoch')
+        ax2.set_ylabel('Precision@0.5')
+        ax2.grid(True, alpha=0.3)
+
+        # Recall
+        ax3.plot(epochs, recall, 'r-', linewidth=2, marker='^')
+        ax3.set_title('Recall@0.5 Over Training',
+                      fontsize=12, fontweight='bold')
+        ax3.set_xlabel('Epoch')
+        ax3.set_ylabel('Recall@0.5')
+        ax3.grid(True, alpha=0.3)
+
+        # F1-Score
+        ax4.plot(epochs, f1, 'm-', linewidth=2, marker='D')
+        ax4.set_title('F1-Score@0.5 Over Training',
+                      fontsize=12, fontweight='bold')
+        ax4.set_xlabel('Epoch')
+        ax4.set_ylabel('F1-Score@0.5')
+        ax4.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            logger.info(f"Training curves saved to {save_path}")
+        else:
+            plt.show()
+
+        plt.close()
 
 
 class DetectionMetrics:
@@ -429,46 +588,89 @@ class DetectionMetrics:
 
         print("="*60)
 
-    def save_metrics(self, results: Dict, save_path: str):
+    def save_metrics(self, results: Dict, save_path: str, epoch: int = None,
+                     model_type: str = '', dataset: str = '', save_individual: bool = False):
         """
-        Save metrics results to a file.
+        Save metrics results with CSV tracking and enhanced reporting.
 
         Args:
             results: Metrics results
-            save_path: Path to save the metrics
+            save_path: Base path to save the metrics
+            epoch: Training epoch (None for final evaluation)
+            model_type: Model type for CSV tracking
+            dataset: Dataset name for CSV tracking
+            save_individual: Whether to save individual epoch files (default: False)
         """
         import json
 
-        # Convert numpy types to Python types for JSON serialization
-        def convert_numpy(obj):
-            if isinstance(obj, np.ndarray):
-                return obj.tolist()
-            elif isinstance(obj, (np.integer, np.floating)):
-                return float(obj)
-            elif isinstance(obj, dict):
-                return {key: convert_numpy(value) for key, value in obj.items()}
-            elif isinstance(obj, list):
-                return [convert_numpy(item) for item in obj]
-            return obj
+        base_path = Path(save_path)
+        base_path.parent.mkdir(parents=True, exist_ok=True)
 
-        serializable_results = convert_numpy(results)
+        # Setup CSV tracker
+        csv_path = base_path.parent / 'training_metrics.csv'
+        tracker = MetricsTracker(str(csv_path))
 
-        with open(save_path, 'w') as f:
-            json.dump(serializable_results, f, indent=2)
+        # Log to CSV (always)
+        tracker.log_metrics(
+            results,
+            epoch=epoch,
+            model_type=model_type,
+            dataset=dataset,
+            notes=f"Evaluation at epoch {epoch}" if epoch else "Final evaluation"
+        )
 
-        logger.info(f"Metrics saved to {save_path}")
+        # Only save individual files if requested or for final evaluation
+        if save_individual or epoch is None:
+            # Convert numpy types to Python types for JSON serialization
+            def convert_numpy(obj):
+                if isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                elif isinstance(obj, (np.integer, np.floating)):
+                    return float(obj)
+                elif isinstance(obj, dict):
+                    return {key: convert_numpy(value) for key, value in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert_numpy(item) for item in obj]
+                return obj
 
-        # Also save a human-readable text summary
-        txt_path = save_path.replace('.json', '_summary.txt')
-        self.save_text_summary(results, txt_path)
+            serializable_results = convert_numpy(results)
 
-    def save_text_summary(self, results: Dict, save_path: str):
+            # For final evaluation, use enhanced naming
+            if epoch is None:
+                json_path = str(base_path).replace('.json', '_final.json')
+                txt_path = str(base_path).replace('.json', '_final_report.txt')
+            else:
+                json_path = str(base_path)
+                txt_path = str(base_path).replace('.json', '_summary.txt')
+
+            with open(json_path, 'w') as f:
+                json.dump(serializable_results, f, indent=2)
+
+            logger.info(f"Metrics saved to {json_path}")
+
+            # Save enhanced text summary
+            self.save_enhanced_summary(
+                results, txt_path, epoch, model_type, dataset)
+
+        # Generate training curves if we have epoch data
+        if epoch is not None:
+            curves_path = base_path.parent / 'training_curves.png'
+            try:
+                tracker.plot_training_curves(str(curves_path))
+            except Exception as e:
+                logger.warning(f"Could not generate training curves: {e}")
+
+    def save_enhanced_summary(self, results: Dict, save_path: str, epoch: int = None,
+                              model_type: str = '', dataset: str = ''):
         """
-        Save a human-readable text summary of metrics.
+        Save an enhanced human-readable text summary of metrics.
 
         Args:
             results: Metrics results
             save_path: Path to save the text summary
+            epoch: Training epoch (None for final evaluation)
+            model_type: Model type
+            dataset: Dataset name
         """
         from datetime import datetime
         import platform
@@ -477,134 +679,220 @@ class DetectionMetrics:
         per_class = results.get('per_class_metrics', {})
 
         with open(save_path, 'w') as f:
-            # Header
-            f.write("CATTLE DETECTION MODEL - EVALUATION REPORT\n")
-            f.write("=" * 60 + "\n\n")
+            # Enhanced Header
+            f.write("🐄 CATTLE DETECTION MODEL - EVALUATION REPORT\n")
+            f.write("=" * 80 + "\n\n")
 
-            # Timestamp and system info
+            # Metadata
             f.write(
-                f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"System: {platform.system()} {platform.release()}\n")
-            f.write(f"Python: {platform.python_version()}\n\n")
+                f"📅 Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"💻 System: {platform.system()} {platform.release()}\n")
+            f.write(f"🐍 Python: {platform.python_version()}\n")
+            if model_type:
+                f.write(f"🧠 Model: {model_type}\n")
+            if dataset:
+                f.write(f"📊 Dataset: {dataset}\n")
+            if epoch is not None:
+                f.write(f"🔄 Epoch: {epoch}\n")
+            else:
+                f.write("✅ Final Evaluation\n")
+            f.write("\n")
 
             # Dataset Statistics
-            f.write("DATASET STATISTICS:\n")
-            f.write("-" * 30 + "\n")
-            f.write(f"Images evaluated: {len(self.predictions)}\n")
+            f.write("📊 DATASET STATISTICS:\n")
+            f.write("-" * 60 + "\n")
+            f.write(f"Images evaluated: {len(self.predictions):,}\n")
             f.write(
-                f"Total predictions: {summary.get('num_predictions', 0)}\n")
+                f"Total predictions: {summary.get('num_predictions', 0):,}\n")
             f.write(
-                f"Total ground truths: {summary.get('num_ground_truths', 0)}\n")
+                f"Total ground truths: {summary.get('num_ground_truths', 0):,}\n")
             f.write(
                 f"Score threshold: {summary.get('score_threshold', self.score_threshold):.2f}\n\n")
 
             # Key Performance Metrics
-            f.write("KEY PERFORMANCE METRICS:\n")
-            f.write("-" * 30 + "\n")
-            f.write(
-                f"mAP@0.5       : {summary.get('mAP@0.5', 0):.4f} ({summary.get('mAP@0.5', 0)*100:.2f}%)\n")
-            f.write(
-                f"mAP@0.75      : {summary.get('mAP@0.75', 0):.4f} ({summary.get('mAP@0.75', 0)*100:.2f}%)\n")
-            f.write(
-                f"mAP@0.5:0.95  : {summary.get('mAP@0.5:0.95', 0):.4f} ({summary.get('mAP@0.5:0.95', 0)*100:.2f}%)\n")
-            f.write(
-                f"Precision@0.5 : {summary.get('precision@0.5', 0):.4f} ({summary.get('precision@0.5', 0)*100:.2f}%)\n")
-            f.write(
-                f"Recall@0.5    : {summary.get('recall@0.5', 0):.4f} ({summary.get('recall@0.5', 0)*100:.2f}%)\n")
-            f.write(
-                f"F1-Score@0.5  : {summary.get('f1@0.5', 0):.4f} ({summary.get('f1@0.5', 0)*100:.2f}%)\n\n")
-
-            # Performance Interpretation
-            f.write("PERFORMANCE INTERPRETATION:\n")
-            f.write("-" * 30 + "\n")
+            f.write("🎯 KEY PERFORMANCE METRICS:\n")
+            f.write("-" * 60 + "\n")
             map50 = summary.get('mAP@0.5', 0)
+            map75 = summary.get('mAP@0.75', 0)
+            map_coco = summary.get('mAP@0.5:0.95', 0)
             precision = summary.get('precision@0.5', 0)
             recall = summary.get('recall@0.5', 0)
+            f1 = summary.get('f1@0.5', 0)
 
-            if map50 >= 0.8:
-                f.write("🟢 EXCELLENT: Model shows excellent detection performance\n")
+            f.write(f"mAP@0.5       : {map50:.4f} ({map50*100:.2f}%)\n")
+            f.write(f"mAP@0.75      : {map75:.4f} ({map75*100:.2f}%)\n")
+            f.write(f"mAP@0.5:0.95  : {map_coco:.4f} ({map_coco*100:.2f}%)\n")
+            f.write(
+                f"Precision@0.5 : {precision:.4f} ({precision*100:.2f}%)\n")
+            f.write(f"Recall@0.5    : {recall:.4f} ({recall*100:.2f}%)\n")
+            f.write(f"F1-Score@0.5  : {f1:.4f} ({f1*100:.2f}%)\n\n")
+
+            # Enhanced Performance Interpretation
+            f.write("🔍 PERFORMANCE INTERPRETATION:\n")
+            f.write("-" * 60 + "\n")
+
+            # Overall performance rating
+            if map50 >= 0.85:
+                f.write("🟢 EXCELLENT: Outstanding detection performance\n")
+                improvement_suggestions = [
+                    "Fine-tune for edge cases", "Consider ensemble methods"]
+            elif map50 >= 0.7:
+                f.write("🟢 VERY GOOD: Strong detection performance\n")
+                improvement_suggestions = [
+                    "Optimize inference speed", "Reduce false positives"]
             elif map50 >= 0.6:
-                f.write("🟡 GOOD: Model shows good detection performance\n")
+                f.write(
+                    "🟡 GOOD: Solid detection performance with room for improvement\n")
+                improvement_suggestions = [
+                    "Hyperparameter tuning", "Data augmentation", "Longer training"]
             elif map50 >= 0.4:
-                f.write("🟠 MODERATE: Model shows moderate detection performance\n")
+                f.write("🟠 MODERATE: Acceptable performance, needs optimization\n")
+                improvement_suggestions = [
+                    "Architecture changes", "Better data quality", "Advanced training techniques"]
             else:
-                f.write("🔴 POOR: Model shows poor detection performance\n")
+                f.write("🔴 POOR: Significant improvement needed\n")
+                improvement_suggestions = [
+                    "Review model architecture", "Check data quality", "Increase training duration"]
 
-            if precision >= 0.8:
-                f.write("✅ HIGH PRECISION: Low false positive rate\n")
-            elif precision >= 0.6:
-                f.write("⚡ MODERATE PRECISION: Acceptable false positive rate\n")
+            # Precision analysis
+            if precision >= 0.85:
+                f.write("✅ HIGH PRECISION: Excellent false positive control\n")
+            elif precision >= 0.7:
+                f.write("✅ GOOD PRECISION: Good false positive control\n")
             else:
                 f.write("⚠️  LOW PRECISION: High false positive rate\n")
 
-            if recall >= 0.8:
-                f.write("✅ HIGH RECALL: Successfully detects most cattle\n")
-            elif recall >= 0.6:
-                f.write("⚡ MODERATE RECALL: Misses some cattle instances\n")
+            # Recall analysis
+            if recall >= 0.85:
+                f.write("✅ HIGH RECALL: Excellent detection coverage\n")
+            elif recall >= 0.7:
+                f.write("✅ GOOD RECALL: Good detection coverage\n")
             else:
-                f.write("⚠️  LOW RECALL: Misses many cattle instances\n")
+                f.write("⚠️  LOW RECALL: Missing many cattle instances\n")
+
+            # Balance analysis
+            precision_recall_diff = abs(precision - recall)
+            if precision_recall_diff < 0.05:
+                f.write("⚖️  BALANCED: Good precision-recall balance\n")
+            elif precision > recall + 0.1:
+                f.write(
+                    "📈 PRECISION-BIASED: Conservative predictions, consider lowering threshold\n")
+            else:
+                f.write(
+                    "📉 RECALL-BIASED: Aggressive predictions, consider raising threshold\n")
 
             f.write("\n")
 
-            # Per-Class Metrics
+            # Per-Class Detailed Metrics
             if per_class:
-                f.write("PER-CLASS DETAILED METRICS:\n")
-                f.write("-" * 30 + "\n")
-                for class_id, class_metrics in per_class.items():
-                    if 0.5 in class_metrics:
-                        metrics = class_metrics[0.5]
-                        class_name = f"Class {class_id}" if class_id != 1 else "Cattle"
-                        f.write(f"\n{class_name}:\n")
+                f.write("📋 PER-CLASS DETAILED METRICS:\n")
+                f.write("-" * 60 + "\n")
+                for class_name, metrics in per_class.items():
+                    if isinstance(metrics, dict):
+                        f.write(f"\n{class_name.capitalize()}:\n")
                         f.write(
-                            f"  Average Precision: {metrics['ap']:.4f} ({metrics['ap']*100:.2f}%)\n")
+                            f"  Average Precision: {metrics.get('ap', 0):.4f} ({metrics.get('ap', 0)*100:.2f}%)\n")
                         f.write(
-                            f"  Precision:         {metrics['precision']:.4f} ({metrics['precision']*100:.2f}%)\n")
+                            f"  Precision:         {metrics.get('precision', 0):.4f} ({metrics.get('precision', 0)*100:.2f}%)\n")
                         f.write(
-                            f"  Recall:           {metrics['recall']:.4f} ({metrics['recall']*100:.2f}%)\n")
+                            f"  Recall:           {metrics.get('recall', 0):.4f} ({metrics.get('recall', 0)*100:.2f}%)\n")
                         f.write(
-                            f"  F1-Score:         {metrics['f1']:.4f} ({metrics['f1']*100:.2f}%)\n")
+                            f"  F1-Score:         {metrics.get('f1', 0):.4f} ({metrics.get('f1', 0)*100:.2f}%)\n")
+                f.write("\n")
 
-            # IoU Threshold Analysis
-            f.write("\n\nIoU THRESHOLD ANALYSIS:\n")
-            f.write("-" * 30 + "\n")
-            f.write("Performance across different IoU thresholds:\n\n")
+            # IoU Threshold Analysis (Enhanced)
+            iou_analysis = results.get('iou_analysis', {})
+            if iou_analysis:
+                f.write("🎯 IoU THRESHOLD ANALYSIS:\n")
+                f.write("-" * 60 + "\n")
+                f.write("Performance across different IoU thresholds:\n\n")
+                f.write("IoU Thresh | Average Precision | Performance Grade\n")
+                f.write("-----------+------------------+------------------\n")
 
-            if per_class and 1 in per_class:  # Assuming class 1 is cattle
-                cattle_metrics = per_class[1]
-                f.write("IoU Thresh | Average Precision\n")
-                f.write("-----------+------------------\n")
-                for iou_thresh in sorted(cattle_metrics.keys()):
-                    ap = cattle_metrics[iou_thresh]['ap']
-                    f.write(f"   {iou_thresh:.2f}     |     {ap:.4f}\n")
+                for iou_thresh, ap_value in iou_analysis.items():
+                    if isinstance(ap_value, (int, float)):
+                        grade = "🟢 Excellent" if ap_value >= 0.7 else "🟡 Good" if ap_value >= 0.5 else "🟠 Moderate" if ap_value >= 0.3 else "🔴 Poor"
+                        f.write(
+                            f"   {iou_thresh:.2f}     |     {ap_value:.4f}        | {grade}\n")
+                f.write("\n")
 
-            # Recommendations
-            f.write("\n\nRECOMMENDations FOR IMPROVEMENT:\n")
-            f.write("-" * 30 + "\n")
+            # Improvement Recommendations
+            f.write("💡 RECOMMENDATIONS FOR IMPROVEMENT:\n")
+            f.write("-" * 60 + "\n")
+            for i, suggestion in enumerate(improvement_suggestions, 1):
+                f.write(f"• {suggestion}\n")
 
-            if map50 < 0.6:
-                f.write("• Consider training for more epochs\n")
-                f.write("• Try data augmentation techniques\n")
-                f.write("• Check if dataset has sufficient quality annotations\n")
-
-            if precision < 0.7:
-                f.write("• Model has high false positive rate\n")
-                f.write("• Consider increasing confidence threshold\n")
-                f.write("• Review difficult negative samples\n")
-
+            # Model-specific recommendations
+            if map50 < 0.7:
+                f.write("• Consider increasing training epochs or learning rate\n")
+            if precision < 0.8:
+                f.write(
+                    "• Increase confidence threshold to reduce false positives\n")
             if recall < 0.7:
-                f.write("• Model misses cattle instances\n")
-                f.write("• Consider lowering confidence threshold\n")
-                f.write("• Add more diverse training samples\n")
+                f.write(
+                    "• Lower confidence threshold or improve data augmentation\n")
+            if map75 < map50 * 0.6:
+                f.write(
+                    "• Focus on improving localization accuracy (bounding box precision)\n")
 
-            if summary.get('mAP@0.75', 0) / max(map50, 0.001) < 0.7:
-                f.write("• Localization accuracy can be improved\n")
-                f.write("• Consider bbox regression loss tuning\n")
-                f.write("• Check annotation quality for precise boundaries\n")
+            f.write("\n")
 
-            f.write("\n" + "=" * 60 + "\n")
-            f.write("End of Report\n")
+            # Training Progress (if epoch provided)
+            if epoch is not None:
+                f.write("📈 TRAINING PROGRESS:\n")
+                f.write("-" * 60 + "\n")
+                f.write(f"Current epoch: {epoch}\n")
+                f.write(
+                    "• Check training_metrics.csv for detailed progress tracking\n")
+                f.write("• Training curves available in training_curves.png\n\n")
 
-        logger.info(f"Text summary saved to {save_path}")
+            f.write("=" * 80 + "\n")
+            f.write(
+                "📊 End of Report - Check training_metrics.csv for consolidated tracking\n")
+            f.write("=" * 80 + "\n")
+
+        logger.info(f"Enhanced evaluation report saved to {save_path}")
+
+    @staticmethod
+    def cleanup_old_metrics(metrics_dir: str, keep_final: bool = True, keep_csv: bool = True):
+        """
+        Clean up old individual epoch metric files, keeping only essential ones.
+
+        Args:
+            metrics_dir: Path to metrics directory
+            keep_final: Whether to keep final evaluation files
+            keep_csv: Whether to keep CSV tracking file
+        """
+        metrics_path = Path(metrics_dir)
+        if not metrics_path.exists():
+            logger.warning(f"Metrics directory not found: {metrics_path}")
+            return
+
+        files_removed = 0
+
+        for file_path in metrics_path.iterdir():
+            if file_path.is_file():
+                filename = file_path.name
+
+                # Keep CSV files
+                if keep_csv and filename.endswith('.csv'):
+                    continue
+
+                # Keep final evaluation files
+                if keep_final and ('final' in filename or 'training_curves' in filename):
+                    continue
+
+                # Remove individual epoch files
+                if 'epoch_' in filename and (filename.endswith('.json') or filename.endswith('.txt')):
+                    try:
+                        file_path.unlink()
+                        files_removed += 1
+                    except Exception as e:
+                        logger.warning(f"Could not remove {file_path}: {e}")
+
+        logger.info(
+            f"Cleaned up {files_removed} old metric files from {metrics_path}")
+        logger.info(f"Consolidated metrics available in training_metrics.csv")
 
 
 def evaluate_model(model, dataloader, device, score_threshold=0.5, num_classes=2):
@@ -648,5 +936,6 @@ def evaluate_model(model, dataloader, device, score_threshold=0.5, num_classes=2
 # Export commonly used functions
 __all__ = [
     'DetectionMetrics',
+    'MetricsTracker',
     'evaluate_model'
 ]

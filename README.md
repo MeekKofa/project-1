@@ -101,13 +101,13 @@ This launches an interactive menu for all operations.
 
 ```bash
 # Preprocess cattle face dataset
-python main.py preprocess --dataset cattleface --split-ratio 0.8
+python main.py preprocess -d cattleface -s 0.8
 
 # Preprocess cattle body dataset
-python main.py preprocess --dataset cattlebody --split-ratio 0.8
+python main.py preprocess -d cattlebody -s 0.8
 
-# Custom split ratios
-python main.py preprocess --dataset cattleface --split-ratio 0.7 --val-ratio 0.15 --test-ratio 0.15
+# Force reprocessing
+python main.py preprocess -d cattleface -s 0.7 -f
 ```
 
 ### Available Datasets
@@ -131,54 +131,36 @@ python main.py preprocess --dataset cattleface --split-ratio 0.7 --val-ratio 0.1
 
 ```bash
 # Basic training
-python main.py train --model faster_rcnn --dataset cattlebody
+python main.py train -m faster_rcnn -d cattlebody
 
 # Full training with custom parameters
-python main.py train
-    --model faster_rcnn
-    --dataset cattlebody
-    --epochs 50
-    --batch-size 8
-    --learning-rate 0.001
-    --device cuda
+python main.py train -m faster_rcnn -d cattlebody -e 50 -b 8 -lr 0.001 --device cuda
 
 # Quick test training
-python main.py train --model faster_rcnn --dataset cattlebody --epochs 1 --batch-size 2
+python main.py train -m faster_rcnn -d cattlebody -e 1 -b 2
 ```
 
 #### YOLOv8
 
 ```bash
 # Basic training
-python main.py train --model yolov8 --dataset cattlebody
+python main.py train -m yolov8 -d cattlebody
 
 # Advanced training
-python main.py train
-    --model yolov8
-    --dataset cattlebody
-    --epochs 100
-    --batch-size 16
-    --learning-rate 0.01
-    --device cuda
+python main.py train -m yolov8 -d cattlebody -e 100 -b 16 -lr 0.01 --device cuda
 
 # Multiple datasets
-python main.py train --model yolov8 --dataset cattleface --epochs 50
+python main.py train -m yolov8 -d cattleface -e 50
 ```
 
 #### Ultralytics YOLO
 
 ```bash
 # Basic training
-python main.py train --model ultralytics --dataset cattlebody
+python main.py train -m ultralytics -d cattlebody
 
 # Production training
-python main.py train
-    --model ultralytics
-    --dataset cattlebody
-    --epochs 200
-    --batch-size 32
-    --learning-rate 0.01
-    --device cuda
+python main.py train -m ultralytics -d cattlebody -e 200 -b 32 -lr 0.01 --device cuda
 ```
 
 ### Training Output Structure
@@ -207,20 +189,13 @@ outputs/
 
 ```bash
 # Evaluate specific model on specific dataset
-python main.py evaluate --model faster_rcnn --dataset cattlebody
+python main.py evaluate -m faster_rcnn -d cattlebody
 
 # Evaluate with custom parameters
-python main.py evaluate
-    --model faster_rcnn
-    --dataset cattlebody
-    --batch-size 4
-    --score-threshold 0.7
+python main.py evaluate -m faster_rcnn -d cattlebody -b 4 -t 0.7
 
 # Standalone evaluation script
-python src/evaluation/evaluate_model.py
-    --model outputs/cattlebody/faster_rcnn/models/faster_rcnn.pth
-    --dataset cattlebody
-    --output-dir outputs/cattlebody/faster_rcnn/evaluation/
+python src/evaluation/evaluate_model.py -m outputs/cattlebody/faster_rcnn/models/faster_rcnn.pth -d cattlebody -o outputs/cattlebody/faster_rcnn/evaluation/
 ```
 
 ### Evaluation Metrics
@@ -265,10 +240,10 @@ DETECTION METRICS SUMMARY
 
 ```bash
 # Visualize results
-python main.py visualize --model faster_rcnn --dataset cattlebody
+python main.py visualize -m faster_rcnn -d cattlebody
 
 # Run inference on images
-python main.py visualize --model faster_rcnn --input path/to/images/
+python main.py visualize -m faster_rcnn --input path/to/images/
 ```
 
 ## 🔍 Advanced Usage
@@ -298,10 +273,10 @@ python main.py preprocess
 
 ```bash
 # Use specific GPU
-python main.py train --model faster_rcnn --dataset cattlebody --device cuda:0
+python main.py train -m faster_rcnn -d cattlebody --device cuda:0
 
 # Automatic GPU selection
-python main.py train --model faster_rcnn --dataset cattlebody --device auto
+python main.py train -m faster_rcnn -d cattlebody --device auto
 ```
 
 ## 📋 Training Recipes
@@ -310,34 +285,67 @@ python main.py train --model faster_rcnn --dataset cattlebody --device auto
 
 ```bash
 # Fast iteration for development
-python main.py train --model faster_rcnn --dataset cattlebody --epochs 1 --batch-size 2
+python main.py train -m faster_rcnn -d cattlebody -e 1 -b 2
 ```
 
 ### Production Training
 
 ```bash
 # High-quality model training
-python main.py train
-    --model faster_rcnn
-    --dataset cattlebody
-    --epochs 100
-    --batch-size 16
-    --learning-rate 0.001
-    --device cuda
+python main.py train -m faster_rcnn -d cattlebody -e 100 -b 16 -lr 0.001
 ```
+
+    --device cuda
+
+````
 
 ### Comparative Training
 
 ```bash
 # Train same dataset with different models
-python main.py train --model faster_rcnn --dataset cattlebody --epochs 50
-python main.py train --model yolov8 --dataset cattlebody --epochs 50
-python main.py train --model ultralytics --dataset cattlebody --epochs 50
+python main.py train -m faster_rcnn -d cattlebody -e 50
+python main.py train -m yolov8 -d cattlebody -e 50
+python main.py train -m ultralytics -d cattlebody -e 50
 
 # Compare results
-python main.py evaluate --model faster_rcnn --dataset cattlebody
-python main.py evaluate --model yolov8 --dataset cattlebody
-python main.py evaluate --model ultralytics --dataset cattlebody
+python main.py evaluate -m faster_rcnn -d cattlebody
+python main.py evaluate -m yolov8 -d cattlebody
+python main.py evaluate -m ultralytics -d cattlebody
+````
+
+### 🎯 Short Argument Aliases
+
+For faster CLI usage, the system supports short aliases for common arguments:
+
+| Long Form           | Short Form | Description          |
+| ------------------- | ---------- | -------------------- |
+| `--model`           | `-m`       | Model selection      |
+| `--dataset`         | `-d`       | Dataset selection    |
+| `--epochs`          | `-e`       | Number of epochs     |
+| `--batch-size`      | `-b`       | Batch size           |
+| `--learning-rate`   | `-lr`      | Learning rate        |
+| `--score-threshold` | `-t`       | Confidence threshold |
+| `--output-dir`      | `-o`       | Output directory     |
+| `--model-path`      | `-p`       | Model path           |
+| `--split-ratio`     | `-s`       | Dataset split ratio  |
+| `--force`           | `-f`       | Force processing     |
+| `--profile`         | `-pr`      | Training profile     |
+| `--trials`          | `-tr`      | Optimization trials  |
+| `--max-epochs`      | `-me`      | Maximum epochs       |
+| `--augmentation`    | `-a`       | Enable augmentation  |
+| `--early-stopping`  | `-es`      | Early stopping       |
+
+**Examples:**
+
+```bash
+# Short form - much faster to type
+python main.py train -m faster_rcnn -d cattlebody -e 50 -b 8 -lr 0.001
+
+# Long form - more explicit
+python main.py train --model faster_rcnn --dataset cattlebody --epochs 50 --batch-size 8 --learning-rate 0.001
+
+# Mixed usage (both work)
+python main.py train -m faster_rcnn --dataset cattlebody -e 50 --batch-size 8 -lr 0.001
 ```
 
 ## 🛠️ Configuration
@@ -469,10 +477,10 @@ python main.py
 
 ```bash
 # Reduce batch size
-python main.py train --model faster_rcnn --dataset cattlebody --batch-size 2
+python main.py train -m faster_rcnn -d cattlebody -b 2
 
 # Use CPU if GPU memory is insufficient
-python main.py train --model faster_rcnn --dataset cattlebody --device cpu
+python main.py train -m faster_rcnn -d cattlebody --device cpu
 ```
 
 #### Dataset Issues
@@ -492,7 +500,7 @@ python main.py preprocess --dataset cattlebody --force-reprocess
 ls outputs/cattlebody/faster_rcnn/models/
 
 # Retrain if model is corrupted
-python main.py train --model faster_rcnn --dataset cattlebody --epochs 1
+python main.py train -m faster_rcnn -d cattlebody -e 1
 ```
 
 ### Getting Help
@@ -519,21 +527,21 @@ python main.py train --model faster_rcnn --dataset cattlebody --epochs 1
 
 ```bash
 # Complete workflow
-python main.py preprocess --dataset cattlebody
-python main.py train --model faster_rcnn --dataset cattlebody --epochs 50
-python main.py evaluate --model faster_rcnn --dataset cattlebody
-python main.py visualize --model faster_rcnn --dataset cattlebody
+python main.py preprocess -d cattlebody
+python main.py train -m faster_rcnn -d cattlebody -e 50
+python main.py evaluate -m faster_rcnn -d cattlebody
+python main.py visualize -m faster_rcnn -d cattlebody
 
 # All models on one dataset
-python main.py train --model faster_rcnn --dataset cattlebody --epochs 20
-python main.py train --model yolov8 --dataset cattlebody --epochs 20
-python main.py train --model ultralytics --dataset cattlebody --epochs 20
+python main.py train -m faster_rcnn -d cattlebody -e 20
+python main.py train -m yolov8 -d cattlebody -e 20
+python main.py train -m ultralytics -d cattlebody -e 20
 
 # One model on all datasets
-python main.py train --model faster_rcnn --dataset cattlebody --epochs 20
-python main.py train --model faster_rcnn --dataset cattleface --epochs 20
+python main.py train -m faster_rcnn -d cattlebody -e 20
+python main.py train -m faster_rcnn -d cattleface -e 20
 
 # Production ready
-python main.py train --model faster_rcnn --dataset cattlebody --epochs 100 --batch-size 16
+python main.py train -m faster_rcnn -d cattlebody -e 100 -b 16
 ```
 ````
