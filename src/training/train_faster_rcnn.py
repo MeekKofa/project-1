@@ -332,8 +332,8 @@ def train_faster_rcnn(dataset_name='cattleface', **kwargs):
             avg_loss = total_loss / max(1, len(train_loader))
             logger.info(f"Epoch {epoch+1}: Average Loss = {avg_loss:.4f}")
 
-            # Validate every 2 epochs OR on the last epoch
-            if (epoch + 1) % 2 == 0 or epoch == num_epochs - 1:
+            # Validate every 25 epochs OR on the last epoch
+            if (epoch + 1) % 25 == 0 or epoch == num_epochs - 1:
                 model.eval()
                 logger.info("Running comprehensive evaluation...")
                 results = evaluate(model, val_loader, device)
