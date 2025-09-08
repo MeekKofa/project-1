@@ -278,9 +278,15 @@ def train_faster_rcnn(dataset_name='cattleface', **kwargs):
         model.to(device)
 
         params = [p for p in model.parameters() if p.requires_grad]
+
+        # Use learning rate from kwargs if provided, otherwise use default
+        learning_rate = kwargs.get(
+            'learning_rate', FASTER_RCNN_PARAMS['learning_rate'])
+        logger.info(f"Using learning rate: {learning_rate}")
+
         optimizer = torch.optim.SGD(
             params,
-            lr=FASTER_RCNN_PARAMS['learning_rate'],
+            lr=learning_rate,
             momentum=FASTER_RCNN_PARAMS['momentum'],
             weight_decay=FASTER_RCNN_PARAMS['weight_decay']
         )
@@ -364,20 +370,27 @@ def train_faster_rcnn(dataset_name='cattleface', **kwargs):
                         # Save detailed metrics if available
                         if 'detailed_results' in results:
                             detailed = results['detailed_results']
-                            
+
                             # Use systematic metrics directory if available, otherwise fallback
-                            metrics_dir = kwargs.get('metrics_dir', kwargs.get('output_dir', '.'))
-                            metrics_save_path = Path(metrics_dir) / f"metrics_epoch_{epoch+1}.json"
-                            summary_save_path = Path(metrics_dir) / f"summary_epoch_{epoch+1}.txt"
-                            
+                            metrics_dir = kwargs.get(
+                                'metrics_dir', kwargs.get('output_dir', '.'))
+                            metrics_save_path = Path(
+                                metrics_dir) / f"metrics_epoch_{epoch+1}.json"
+                            summary_save_path = Path(
+                                metrics_dir) / f"summary_epoch_{epoch+1}.txt"
+
                             try:
                                 from src.evaluation.metrics import DetectionMetrics
                                 dummy_metrics = DetectionMetrics()
-                                dummy_metrics.save_metrics(detailed, str(metrics_save_path))
-                                logger.info(f"📁 Detailed metrics saved to {metrics_save_path}")
-                                logger.info(f"� Summary saved to {summary_save_path}")
+                                dummy_metrics.save_metrics(
+                                    detailed, str(metrics_save_path))
+                                logger.info(
+                                    f"📁 Detailed metrics saved to {metrics_save_path}")
+                                logger.info(
+                                    f"� Summary saved to {summary_save_path}")
                             except Exception as save_e:
-                                logger.warning(f"Could not save detailed metrics: {save_e}")
+                                logger.warning(
+                                    f"Could not save detailed metrics: {save_e}")
 
                     except Exception as e:
                         logger.warning(
