@@ -101,26 +101,50 @@ def validate(model, val_loader, device):
 
 def train_yolov8(**kwargs):
     try:
+        # Handle device selection with new parsing
+        device_arg = kwargs.get('device', 'cuda:0')
+        if isinstance(device_arg, str):
+            try:
+                from src.utils.device_utils import parse_device
+                device = parse_device(device_arg)
+            except ImportError:
+                logger.warning(
+                    "Device utils not available, using fallback device selection")
+                if torch.cuda.is_available():
+                    device = torch.device('cuda:0')
+                else:
+                    device = torch.device('cpu')
+            except ValueError as e:
+                logger.error(f"Invalid device specification: {e}")
+                logger.info("Falling back to cuda:0 or CPU")
+                if torch.cuda.is_available():
+                    device = torch.device('cuda:0')
+                else:
+                    device = torch.device('cpu')
+        else:
+            device = device_arg
+
         # Configure GPU settings with validation
-        if not torch.cuda.is_available():
-            logger.warning(
-                "CUDA not available, using CPU. Training will be slow!")
-            device = torch.device('cpu')
+        if device.type == 'cpu':
+            logger.warning("Using CPU. Training will be slow!")
             gpu_props = None
             gpu_memory = 0
             actual_batch_size = 4
         else:
-            # Fix device to cuda:0 consistently
-            device = torch.device('cuda:0')
             try:
-                torch.cuda.set_device(0)
+                # Set the specific GPU device
+                if device.index is not None:
+                    torch.cuda.set_device(device.index)
+                else:
+                    torch.cuda.set_device(0)
+
                 torch.cuda.empty_cache()
                 cudnn.benchmark = True
                 cudnn.enabled = True
                 gpu_props = torch.cuda.get_device_properties(device)
                 gpu_memory = gpu_props.total_memory / (1024**3)
                 logger.info(
-                    f"Using GPU: {gpu_props.name} with {gpu_memory:.1f}GB memory")
+                    f"Using GPU {device}: {gpu_props.name} with {gpu_memory:.1f}GB memory")
                 max_batch_size = calculate_batch_size(gpu_memory)
                 actual_batch_size = min(
                     max_batch_size, kwargs.get('batch_size', YOLOV8_PARAMS['batch_size']))

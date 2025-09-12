@@ -21,8 +21,15 @@ Usage Examples:
     # Train YOLOv8 with custom epochs and batch size
     python main.py train --model yolov8 --dataset cattleface --epochs 50 --batch-size 16
     
+    # Train on specific GPU
+    python main.py train --model faster_rcnn --dataset cattle --device 1
+    python main.py train --model yolov8 --dataset cattleface --device cuda:2
+    
     # Run model evaluation
     python main.py evaluate --model faster_rcnn --dataset cattleface
+    
+    # Show available devices
+    python main.py info --list-devices
     
     # Show project structure
     python main.py info --show-structure
@@ -46,6 +53,7 @@ from pathlib import Path
 import argparse
 import logging
 import importlib
+import torch
 from typing import Optional, Dict, Any
 
 # Add src to path for imports FIRST - before any local imports
@@ -79,7 +87,8 @@ def get_available_datasets() -> Dict[str, str]:
     """Get available datasets."""
     return {
         "cattlebody": "Cattle body detection dataset",
-        "cattleface": "Cattle face detection dataset"
+        "cattleface": "Cattle face detection dataset",
+        "cattle": "Combination of cattleface and catle body"
     }
 
 
@@ -147,7 +156,20 @@ def train_model(args: argparse.Namespace, logger: logging.Logger) -> bool:
         if hasattr(args, 'learning_rate') and args.learning_rate:
             train_args['learning_rate'] = args.learning_rate
         if hasattr(args, 'device') and args.device:
-            train_args['device'] = args.device
+            # Validate and parse the device argument
+            try:
+                from src.utils.device_utils import parse_device
+                device = parse_device(args.device)
+                # Convert to string for compatibility
+                train_args['device'] = str(device)
+                logger.info(f"Using device: {device}")
+            except ImportError:
+                logger.warning(
+                    "Device utils not available, using device string directly")
+                train_args['device'] = args.device
+            except ValueError as e:
+                logger.error(f"Invalid device specification: {e}")
+                return False
 
         # Call the main function of the training module
         if hasattr(module, 'main'):
@@ -344,6 +366,30 @@ def show_info(args: argparse.Namespace, logger: logging.Logger) -> None:
         print("=" * 50)
         for key, description in get_available_datasets().items():
             print(f"  {key:15} - {description}")
+
+    if args.list_devices:
+        print("\n🖥️  Available Devices:")
+        print("=" * 50)
+        try:
+            from src.utils.device_utils import list_available_devices, get_device_info, parse_device
+            devices = list_available_devices()
+            for device_str in devices:
+                try:
+                    device = parse_device(device_str)
+                    info = get_device_info(device)
+                    if device.type == 'cuda':
+                        print(f"  {device_str:10} - {info.get('gpu_name', 'Unknown GPU')} "
+                              f"({info.get('total_memory_gb', 0):.1f}GB)")
+                    else:
+                        print(f"  {device_str:10} - {device}")
+                except Exception:
+                    print(f"  {device_str:10} - Available")
+        except ImportError:
+            logger.warning("Device utils not available")
+            print("  cpu        - CPU processing")
+            if torch.cuda.is_available():
+                print("  cuda       - Default CUDA device")
+                print("  auto       - Auto-select best device")
 
     if args.show_structure:
         print("\n📁 Project Structure:")
@@ -596,8 +642,11 @@ Examples:
   %(prog)s preprocess --dataset cattlebody --split-ratio 0.8
   %(prog)s train --model faster_rcnn --dataset cattlebody
   %(prog)s train --model yolov8 --dataset cattleface --epochs 50 --batch-size 16
+  %(prog)s train --model faster_rcnn --dataset cattle --device 2
+  %(prog)s train --model yolov8 --dataset cattleface --device cuda:1
   %(prog)s evaluate --model faster_rcnn --dataset cattleface
   %(prog)s info --list-models
+  %(prog)s info --list-devices
   %(prog)s info --show-structure
         """
     )
@@ -617,8 +666,8 @@ Examples:
                               help='Batch size for training')
     train_parser.add_argument(
         '-lr', '--learning-rate', type=float, help='Learning rate')
-    train_parser.add_argument('--device', choices=['cpu', 'cuda', 'auto'], default='auto',
-                              help='Device to use for training')
+    train_parser.add_argument('--device', type=str, default='auto',
+                              help='Device to use for training (cpu, cuda, auto, or GPU ID like 0, 1, 2, cuda:0, cuda:1, etc.)')
 
     # Evaluate command
     eval_parser = subparsers.add_parser(
@@ -687,6 +736,8 @@ Examples:
     info_parser = subparsers.add_parser('info', help='Show system information')
     info_parser.add_argument(
         '-l', '--list-models', action='store_true', help='List available models and datasets')
+    info_parser.add_argument(
+        '-d', '--list-devices', action='store_true', help='List available devices (GPUs/CPU)')
     info_parser.add_argument(
         '-s', '--show-structure', action='store_true', help='Show project structure')
 

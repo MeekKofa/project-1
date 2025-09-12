@@ -221,7 +221,26 @@ def evaluate_simple(model, data_loader, device):
 
 def train_faster_rcnn(dataset_name='cattleface', **kwargs):
     try:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        # Handle device selection with new parsing
+        device_arg = kwargs.get('device', 'auto')
+        if isinstance(device_arg, str):
+            try:
+                from src.utils.device_utils import parse_device
+                device = parse_device(device_arg)
+            except ImportError:
+                logger.warning(
+                    "Device utils not available, using fallback device selection")
+                device = torch.device(
+                    'cuda' if torch.cuda.is_available() else 'cpu')
+            except ValueError as e:
+                logger.error(f"Invalid device specification: {e}")
+                logger.info("Falling back to auto device selection")
+                device = torch.device(
+                    'cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            # Assume it's already a torch.device
+            device = device_arg
+
         logger.info(f"Using device: {device}")
 
         # Build dataset paths dynamically based on dataset name
