@@ -12,13 +12,15 @@ import re
 import cv2
 import numpy as np
 from multiprocessing import Lock
-import torchvision.transforms as transforms  # <-- Add this import
+import torchvision.transforms as transforms
+from typing import Dict, List, Any
 # replace direct import with robust fallback
 try:
     from utils.data_validation import validate_targets
 except Exception:
     import logging
-    logging.warning("utils.data_validation not available — using local validate_targets fallback")
+    logging.warning(
+        "utils.data_validation not available — using local validate_targets fallback")
 
     def validate_targets(targets):
         """
@@ -39,12 +41,14 @@ except Exception:
             # allow numpy arrays as well
             if isinstance(boxes, (list, tuple, np.ndarray)):
                 try:
-                    boxes = torch.as_tensor(np.array(boxes), dtype=torch.float32)
+                    boxes = torch.as_tensor(
+                        np.array(boxes), dtype=torch.float32)
                 except Exception:
                     return False, "boxes not convertible to tensor"
             if isinstance(labels, (list, tuple, np.ndarray)):
                 try:
-                    labels = torch.as_tensor(np.array(labels), dtype=torch.int64)
+                    labels = torch.as_tensor(
+                        np.array(labels), dtype=torch.int64)
                 except Exception:
                     return False, "labels not convertible to tensor"
             if not isinstance(boxes, torch.Tensor) or not isinstance(labels, torch.Tensor):
@@ -64,15 +68,17 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(os.path.join(os.path.dirname(__file__), 'dataset.log')),
+        logging.FileHandler(os.path.join(
+            os.path.dirname(__file__), 'dataset.log')),
         logging.StreamHandler()
     ]
 )
 
+
 class CattleDataset(Dataset):
     # Add class-level lock for thread-safe caching
     _cache_lock = Lock()
-    
+
     def __init__(self, image_dir, label_dir, transform=None, annotation_format="yolo", max_retries=3, cache_size=64):
         try:
             logging.info(f"Initializing dataset from {image_dir}")
@@ -80,24 +86,27 @@ class CattleDataset(Dataset):
                 raise ValueError(f"Image directory not found: {image_dir}")
             if not os.path.exists(label_dir):
                 raise ValueError(f"Label directory not found: {label_dir}")
-                
+
             self.image_dir = image_dir
             self.label_dir = label_dir
             self.transform = transform
             self.annotation_format = annotation_format
-            self.images = [f for f in os.listdir(image_dir) if f.endswith(('.jpg', '.png', '.jpeg'))]
-            self.cache_size = min(cache_size, len(self.images))  # Limit cache size to dataset size
+            self.images = [f for f in os.listdir(
+                image_dir) if f.endswith(('.jpg', '.png', '.jpeg'))]
+            # Limit cache size to dataset size
+            self.cache_size = min(cache_size, len(self.images))
             self.label_mapping = {}  # Initialize mapping dictionary
-            self.pin_memory = torch.cuda.is_available()  # Enable memory pinning if GPU available
-    
+            # Enable memory pinning if GPU available
+            self.pin_memory = torch.cuda.is_available()
+
             if len(self.images) == 0:
                 raise ValueError(f"No valid images found in {image_dir}")
-                
+
             successful_matches = 0
             failed_matches = []
             skipped_files = []
             retry_count = {}
-            
+
             # Name patterns for image-label matching
             self.patterns = [
                 (r'_n_jpg\.rf\.[^.]+$', ''),  # Facebook format
@@ -105,78 +114,88 @@ class CattleDataset(Dataset):
                 (r'\.rf\.[^.]+$', ''),        # Simple augmented
                 (r'_jpg$', '')                # Basic suffix
             ]
-            
+
             # Build label lookup with all possible variations
-            label_ext = {'coco': '.json', 'yolo': '.txt', 'voc': '.xml'}[annotation_format]
+            label_ext = {'coco': '.json', 'yolo': '.txt',
+                         'voc': '.xml'}[annotation_format]
             self.label_files = {}
-            
+
             # Create comprehensive label mappings
             for f in os.listdir(label_dir):
                 if not f.endswith(label_ext):
                     continue
                 base = os.path.splitext(f)[0]
-                
+
                 # Store all possible variations of the label name
                 variations = [base]
                 for pattern, repl in self.patterns:
                     clean_name = re.sub(pattern, repl, base)
                     if clean_name != base:
                         variations.append(clean_name)
-                
+
                 # Map all variations to this label file
                 for v in variations:
                     self.label_files[v] = f
-                    
-            logging.info(f"Created {len(self.label_files)} label mappings from {len(os.listdir(label_dir))} files")
-            
+
+            logging.info(
+                f"Created {len(self.label_files)} label mappings from {len(os.listdir(label_dir))} files")
+
             # Verify labels with progress bar and retry mechanism
             pbar = tqdm(self.images, desc="Loading dataset")
             remaining_images = self.images.copy()
-            
+
             while remaining_images and max_retries > 0:
                 for img_name in remaining_images[:]:
                     try:
                         base_name = self._get_label_base_name(img_name)
-                        label_path = os.path.join(label_dir, base_name + label_ext)
-                        
+                        label_path = os.path.join(
+                            label_dir, base_name + label_ext)
+
                         if not os.path.exists(label_path):
-                            retry_count[img_name] = retry_count.get(img_name, 0) + 1
+                            retry_count[img_name] = retry_count.get(
+                                img_name, 0) + 1
                             if retry_count[img_name] >= max_retries:
                                 failed_matches.append((img_name, label_path))
                                 remaining_images.remove(img_name)
                             continue
-                            
+
                         self.label_mapping[img_name] = label_path
                         successful_matches += 1
                         remaining_images.remove(img_name)
                         pbar.update(1)
-                        
+
                     except Exception as e:
-                        logging.warning(f"Attempt {retry_count.get(img_name, 0) + 1} failed for {img_name}: {str(e)}")
-                        retry_count[img_name] = retry_count.get(img_name, 0) + 1
+                        logging.warning(
+                            f"Attempt {retry_count.get(img_name, 0) + 1} failed for {img_name}: {str(e)}")
+                        retry_count[img_name] = retry_count.get(
+                            img_name, 0) + 1
                         if retry_count[img_name] >= max_retries:
                             skipped_files.append(img_name)
                             remaining_images.remove(img_name)
-                
+
                 max_retries -= 1
-            
+
             pbar.close()
-            
+
             if len(skipped_files) > 0:
                 logging.warning(f"Skipped {len(skipped_files)} files")
-            
+
             if len(failed_matches) > len(self.images) * 0.5:  # If more than 50% failed
-                logging.error(f"Too many failed matches ({len(failed_matches)} files)")
-                raise ValueError("Dataset loading failed: Too many missing labels")
-                
+                logging.error(
+                    f"Too many failed matches ({len(failed_matches)} files)")
+                raise ValueError(
+                    "Dataset loading failed: Too many missing labels")
+
             # Update images list to only include successfully matched files
-            self.images = [img for img in self.images if img in self.label_mapping]
-            
+            self.images = [
+                img for img in self.images if img in self.label_mapping]
+
             if not self.images:
                 raise ValueError("No valid image-label pairs found")
-                
-            logging.info(f"Successfully loaded {len(self.images)} image-label pairs")
-            
+
+            logging.info(
+                f"Successfully loaded {len(self.images)} image-label pairs")
+
         except Exception as e:
             logging.error(f"Dataset initialization failed: {str(e)}")
             raise
@@ -186,6 +205,70 @@ class CattleDataset(Dataset):
         self._local_cache = {}
         self._cache_initialized = False
         self.cache_size = cache_size
+
+    def analyze_class_distribution(self) -> Dict[str, Any]:
+        """
+        Analyze the class distribution in the dataset
+
+        Returns:
+            Dictionary with class analysis information
+        """
+        try:
+            from utils.data_validation import analyze_dataset_classes
+            return analyze_dataset_classes(self.label_dir, self.annotation_format)
+        except ImportError:
+            logging.warning(
+                "Could not import analyze_dataset_classes, using fallback")
+            return self._analyze_classes_fallback()
+
+    def _analyze_classes_fallback(self) -> Dict[str, Any]:
+        """Fallback class analysis without external dependencies"""
+        class_counts = {}
+        total_annotations = 0
+
+        try:
+            # Sample first 100
+            for img_name in self.images[:min(100, len(self.images))]:
+                try:
+                    base_name = self._get_label_base_name(img_name)
+                    label_ext = {'coco': '.json', 'yolo': '.txt',
+                                 'voc': '.xml'}[self.annotation_format]
+                    label_path = os.path.join(
+                        self.label_dir, base_name + label_ext)
+
+                    if self.annotation_format == "yolo" and os.path.exists(label_path):
+                        with open(label_path, 'r') as f:
+                            for line in f:
+                                parts = line.strip().split()
+                                if len(parts) >= 5:
+                                    # Note: this is the raw YOLO class (before +1 shift)
+                                    class_id = int(float(parts[0]))
+                                    class_counts[class_id] = class_counts.get(
+                                        class_id, 0) + 1
+                                    total_annotations += 1
+                except Exception as e:
+                    continue
+
+            if not class_counts:
+                return {"num_classes": 2, "class_counts": {}, "warning": "No classes found in sample"}
+
+            max_class = max(class_counts.keys())
+            return {
+                "num_classes": max_class + 2,  # +1 for shift, +1 for background
+                "class_counts": class_counts,
+                "max_class": max_class,
+                "total_annotations": total_annotations,
+                "note": "Sampled from first 100 images"
+            }
+
+        except Exception as e:
+            logging.error(f"Class analysis failed: {e}")
+            return {"num_classes": 2, "error": str(e)}
+
+    def get_recommended_num_classes(self) -> int:
+        """Get the recommended number of classes for model initialization"""
+        analysis = self.analyze_class_distribution()
+        return analysis.get("num_classes", 2)
 
     def _initialize_worker_cache(self):
         """Initialize worker-specific cache if not already done"""
@@ -214,14 +297,14 @@ class CattleDataset(Dataset):
                 os.path.splitext(img_name)[0],  # Original
                 self._normalize_name(img_name),  # Normalized
             ]
-            
+
             for name in names_to_try:
                 if name in self.label_files:
                     return os.path.splitext(self.label_files[name])[0]
-            
+
             logging.warning(f"No label match found for {img_name}")
             return names_to_try[0]
-            
+
         except Exception as e:
             logging.error(f"Error processing {img_name}: {str(e)}")
             raise
@@ -236,18 +319,19 @@ class CattleDataset(Dataset):
 
     def __len__(self):
         return len(self.images)
-    
+
     def _parse_coco_annotation(self, label_path):
         with open(label_path, 'r') as f:
             data = json.load(f)
-        
+
         boxes = []
         for annotation in data['annotations']:
             x, y, w, h = annotation['bbox']
-            boxes.append([x, y, x+w, y+h])  # Convert to [xmin, ymin, xmax, ymax]
-        
+            # Convert to [xmin, ymin, xmax, ymax]
+            boxes.append([x, y, x+w, y+h])
+
         return boxes
-    
+
     def _parse_yolo_annotation(self, label_path, img_size):
         """
         Parse YOLO annotation file and convert normalized [x_center,y_center,w,h]
@@ -324,7 +408,7 @@ class CattleDataset(Dataset):
     def _parse_voc_annotation(self, label_path):
         tree = ET.parse(label_path)
         root = tree.getroot()
-        
+
         boxes = []
         for obj in root.findall('object'):
             bndbox = obj.find('bndbox')
@@ -333,9 +417,9 @@ class CattleDataset(Dataset):
             xmax = float(bndbox.find('xmax').text)
             ymax = float(bndbox.find('ymax').text)
             boxes.append([xmin, ymin, xmax, ymax])
-        
+
         return boxes
-    
+
     def _uncached_load_image(self, img_path):
         """Base image loading function without caching"""
         try:
@@ -363,7 +447,8 @@ class CattleDataset(Dataset):
                     self.last_error = str(e)
                     self.error_count += 1
                     if self.error_count > 10:
-                        raise RuntimeError(f"Too many loading errors: {self.last_error}")
+                        raise RuntimeError(
+                            f"Too many loading errors: {self.last_error}")
                     raise
         return self._local_cache[path]
 
@@ -377,10 +462,10 @@ class CattleDataset(Dataset):
         img_path = os.path.join(self.image_dir, img_name)
         try:
             image = self._load_image(img_path)
-            
+
             # Get dimensions before transform
             img_width, img_height = image.size
-            
+
             # Apply transforms (may return PIL or Tensor)
             if self.transform:
                 try:
@@ -401,20 +486,27 @@ class CattleDataset(Dataset):
                     image = image.permute(2, 0, 1)
 
             base_name = self._get_label_base_name(img_name)
-            label_ext = {'coco': '.json', 'yolo': '.txt', 'voc': '.xml'}[self.annotation_format]
+            label_ext = {'coco': '.json', 'yolo': '.txt',
+                         'voc': '.xml'}[self.annotation_format]
             label_path = os.path.join(self.label_dir, base_name + label_ext)
 
             # Parse annotations into numpy arrays (boxes_np [N,4], labels_np [N])
             if self.annotation_format == "coco":
-                boxes_np = np.array(self._parse_coco_annotation(label_path), dtype=np.float32)
-                labels_np = np.ones((len(boxes_np),), dtype=np.int64) if len(boxes_np) else np.zeros((0,), dtype=np.int64)
+                boxes_np = np.array(self._parse_coco_annotation(
+                    label_path), dtype=np.float32)
+                labels_np = np.ones((len(boxes_np),), dtype=np.int64) if len(
+                    boxes_np) else np.zeros((0,), dtype=np.int64)
             elif self.annotation_format == "yolo":
-                boxes_np, labels_np = self._parse_yolo_annotation(label_path, (img_width, img_height))
+                boxes_np, labels_np = self._parse_yolo_annotation(
+                    label_path, (img_width, img_height))
             elif self.annotation_format == "voc":
-                boxes_np = np.array(self._parse_voc_annotation(label_path), dtype=np.float32)
-                labels_np = np.ones((len(boxes_np),), dtype=np.int64) if len(boxes_np) else np.zeros((0,), dtype=np.int64)
+                boxes_np = np.array(self._parse_voc_annotation(
+                    label_path), dtype=np.float32)
+                labels_np = np.ones((len(boxes_np),), dtype=np.int64) if len(
+                    boxes_np) else np.zeros((0,), dtype=np.int64)
             else:
-                raise ValueError(f"Unsupported annotation format: {self.annotation_format}")
+                raise ValueError(
+                    f"Unsupported annotation format: {self.annotation_format}")
 
             # Ensure numpy defaults if empty
             if boxes_np is None:
@@ -424,12 +516,14 @@ class CattleDataset(Dataset):
 
             # Convert to tensors with correct dtypes
             try:
-                boxes = torch.from_numpy(boxes_np.astype(np.float32)) if not isinstance(boxes_np, torch.Tensor) else boxes_np.to(dtype=torch.float32)
+                boxes = torch.from_numpy(boxes_np.astype(np.float32)) if not isinstance(
+                    boxes_np, torch.Tensor) else boxes_np.to(dtype=torch.float32)
             except Exception:
                 boxes = torch.zeros((0, 4), dtype=torch.float32)
 
             try:
-                labels = torch.from_numpy(labels_np.astype(np.int64)) if not isinstance(labels_np, torch.Tensor) else labels_np.to(dtype=torch.int64)
+                labels = torch.from_numpy(labels_np.astype(np.int64)) if not isinstance(
+                    labels_np, torch.Tensor) else labels_np.to(dtype=torch.int64)
             except Exception:
                 labels = torch.zeros((0,), dtype=torch.int64)
 
@@ -446,7 +540,8 @@ class CattleDataset(Dataset):
             }
 
             # Validate and fallback to empty if invalid
-            is_valid, error_msg = validate_targets([target])
+            is_valid, error_msg = validate_targets(
+                [target])  # Let it infer num_classes
             if not is_valid:
                 logging.warning(f"Invalid target at index {idx}: {error_msg}")
                 target = {
@@ -472,6 +567,7 @@ class CattleDataset(Dataset):
         if hasattr(self, '_local_cache'):
             self._local_cache.clear()
 
+
 def collate_fn(batch):
     """
     Robust, minimal collate function.
@@ -484,7 +580,8 @@ def collate_fn(batch):
     good_items = []
     for i, item in enumerate(batch):
         if not isinstance(item, (list, tuple)) or len(item) != 2:
-            logging.warning(f"collate_fn: skipping malformed batch item index={i}")
+            logging.warning(
+                f"collate_fn: skipping malformed batch item index={i}")
             continue
         good_items.append(item)
 
@@ -493,6 +590,7 @@ def collate_fn(batch):
 
     images, targets = list(zip(*good_items))
     return list(images), list(targets)
+
 
 def worker_init_fn(worker_id):
     """Initialize worker process"""

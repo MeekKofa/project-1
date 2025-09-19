@@ -219,8 +219,61 @@ def evaluate_simple(model, data_loader, device):
     return result
 
 
-def train_faster_rcnn(dataset_name='cattleface', **kwargs):
+def train_faster_rcnn(dataset_path=None, **kwargs):
     try:
+        # Import dataset config system
+        from config.dataset_config import DatasetConfig
+
+        # Determine dataset path
+        if dataset_path is None:
+            # Fallback to old behavior for backward compatibility
+            dataset_name = kwargs.get(
+                'dataset_name', kwargs.get('dataset', 'cattle'))
+            project_root = Path(__file__).parent.parent.parent
+            dataset_path = project_root / "processed_data" / dataset_name
+            logger.info(f"Using default dataset path: {dataset_path}")
+        else:
+            dataset_path = Path(dataset_path)
+            logger.info(f"Using provided dataset path: {dataset_path}")
+
+        # Auto-configure dataset
+        logger.info("🔍 Analyzing dataset configuration...")
+        dataset_config = DatasetConfig(str(dataset_path), "yolo")
+
+        # Validate dataset
+        validation_issues = dataset_config.validate_for_training()
+        if validation_issues:
+            logger.error("❌ Dataset validation failed:")
+            for issue in validation_issues:
+                logger.error(f"  - {issue}")
+            raise ValueError(
+                f"Dataset validation failed: {', '.join(validation_issues)}")
+
+        # Print configuration summary
+        if not kwargs.get('quiet', False):
+            dataset_config.print_summary()
+
+        # Get paths from configuration
+        train_paths = dataset_config.get_split_paths("train")
+        train_images = train_paths["images"]
+        train_labels = train_paths["labels"]
+
+        # Validation split (optional)
+        try:
+            val_paths = dataset_config.get_split_paths("val")
+            val_images = val_paths["images"]
+            val_labels = val_paths["labels"]
+        except ValueError:
+            logger.warning(
+                "No validation split found, using train split for validation")
+            val_images = train_images
+            val_labels = train_labels
+
+        # Get num_classes from dataset analysis
+        num_classes = dataset_config.num_classes
+        logger.info(
+            f"🎯 Using num_classes: {num_classes} (auto-detected from dataset)")
+
         # Handle device selection with new parsing
         device_arg = kwargs.get('device', 'auto')
         if isinstance(device_arg, str):
@@ -243,25 +296,6 @@ def train_faster_rcnn(dataset_name='cattleface', **kwargs):
 
         logger.info(f"Using device: {device}")
 
-        # Build dataset paths dynamically based on dataset name
-        project_root = Path(__file__).parent.parent.parent
-        processed_data_root = project_root / "processed_data" / dataset_name
-
-        train_images_dir = processed_data_root / 'train' / 'images'
-        train_labels_dir = processed_data_root / 'train' / 'labels'
-        val_images_dir = processed_data_root / 'val' / 'images'
-        val_labels_dir = processed_data_root / 'val' / 'labels'
-
-        # Convert to strings for compatibility
-        train_images = str(train_images_dir)
-        train_labels = str(train_labels_dir)
-        val_images = str(val_images_dir)
-        val_labels = str(val_labels_dir)
-
-        logger.info(f"Using dataset: {dataset_name}")
-        logger.info(f"Train images: {train_images}")
-        logger.info(f"Train labels: {train_labels}")
-
         # IMPORTANT: do NOT change geometry here; model will handle resize/normalize.
         transform = transforms.Compose([
             transforms.ToTensor(),
@@ -276,6 +310,13 @@ def train_faster_rcnn(dataset_name='cattleface', **kwargs):
         logger.info(f"Train dataset size: {len(train_dataset)}")
         logger.info(f"Val dataset size: {len(val_dataset)}")
 
+        # Use num_classes from dataset configuration (already determined above)
+        # Allow override via kwargs for testing purposes
+        final_num_classes = kwargs.get('num_classes', num_classes)
+        if final_num_classes != num_classes:
+            logger.warning(
+                f"Overriding auto-detected num_classes ({num_classes}) with {final_num_classes}")
+        logger.info(f"Final num_classes for model: {final_num_classes}")        
         train_loader = DataLoader(
             train_dataset,
             batch_size=kwargs.get(
@@ -293,7 +334,7 @@ def train_faster_rcnn(dataset_name='cattleface', **kwargs):
         )
 
         logger.info("Initializing model...")
-        model = create_cattle_detection_model(num_classes=2)
+        model = create_cattle_detection_model(num_classes=final_num_classes)
         model.to(device)
 
         params = [p for p in model.parameters() if p.requires_grad]
@@ -442,11 +483,18 @@ def main(**kwargs):
     try:
         logger.info(f"Starting Faster R-CNN training with arguments: {kwargs}")
 
-        # Extract dataset name from kwargs
-        dataset_name = kwargs.get('dataset', 'cattleface')
+        # Get dataset path (new robust method) or fall back to dataset name
+        dataset_path = kwargs.get('dataset_path')
+        if dataset_path is None:
+            # Backward compatibility: extract dataset name
+            dataset_name = kwargs.get('dataset', 'cattle')
+            logger.info(
+                f"Using dataset name '{dataset_name}' (backward compatibility mode)")
+        else:
+            logger.info(f"Using dataset path '{dataset_path}' (robust mode)")
 
-        # Call train_faster_rcnn with the dataset name and other parameters
-        train_faster_rcnn(dataset_name=dataset_name, **kwargs)
+        # Call train_faster_rcnn with the dataset path and other parameters
+        train_faster_rcnn(dataset_path=dataset_path, **kwargs)
         return True
     except Exception as e:
         logger.error(f"Training failed: {str(e)}")

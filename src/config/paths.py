@@ -3,17 +3,17 @@ from pathlib import Path
 
 # Base paths - adjusted to work with our current structure
 PROJECT_ROOT = Path(__file__).parent.parent.parent  # Go up to project root
-DATASET_ROOT = PROJECT_ROOT / "dataset" / "cattleface"
+DATASET_ROOT = PROJECT_ROOT / "dataset" / "cattle"
 
 # Use our processed data structure instead of the hardcoded Windows path
-PROCESSED_DATA_ROOT = PROJECT_ROOT / "processed_data" / "cattleface"
+PROCESSED_DATA_ROOT = PROJECT_ROOT / "processed_data" / "cattle"
 
 # Dataset organization paths
-TRAIN_IMAGES = PROCESSED_DATA_ROOT / 'train'
-# Labels are in the same directory for our structure
-TRAIN_LABELS = PROCESSED_DATA_ROOT / 'train'
-VAL_IMAGES = PROCESSED_DATA_ROOT / 'val'
-VAL_LABELS = PROCESSED_DATA_ROOT / 'val'
+TRAIN_IMAGES = PROCESSED_DATA_ROOT / 'train' / 'images'
+# Labels are in a separate subdirectory
+TRAIN_LABELS = PROCESSED_DATA_ROOT / 'train' / 'labels'
+VAL_IMAGES = PROCESSED_DATA_ROOT / 'val' / 'images'
+VAL_LABELS = PROCESSED_DATA_ROOT / 'val' / 'labels'
 
 # Model paths - use our outputs structure
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"

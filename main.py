@@ -103,30 +103,51 @@ def get_available_models() -> Dict[str, str]:
 def train_model(args: argparse.Namespace, logger: logging.Logger) -> bool:
     """Train a model with the specified configuration."""
     model_name = args.model
-    dataset = args.dataset
+
+    # Handle new dataset specification methods
+    if hasattr(args, 'dataset_path') and args.dataset_path:
+        # Robust mode: using direct dataset path
+        dataset_path = args.dataset_path
+        # Use folder name as dataset identifier
+        dataset_name = Path(dataset_path).name
+        logger.info(f"Using dataset path: {dataset_path}")
+
+        # Validate dataset exists
+        if not os.path.exists(dataset_path):
+            logger.error(f"Dataset path does not exist: {dataset_path}")
+            return False
+
+    else:
+        # Backward compatibility mode: using dataset name
+        dataset_name = args.dataset
+        if dataset_name not in get_available_datasets():
+            logger.error(
+                f"Unknown dataset: {dataset_name}. Available datasets: {list(get_available_datasets().keys())}")
+            return False
+        dataset_path = None  # Will be determined by training function
+        logger.info(
+            f"Using dataset name: {dataset_name} (backward compatibility)")
 
     if model_name not in TRAINING_CONFIGS:
         logger.error(
             f"Unknown model: {model_name}. Available models: {list(TRAINING_CONFIGS.keys())}")
         return False
 
-    if dataset not in get_available_datasets():
-        logger.error(
-            f"Unknown dataset: {dataset}. Available datasets: {list(get_available_datasets().keys())}")
-        return False
-
     config = TRAINING_CONFIGS[model_name]
-    logger.info(f"Starting {config['name']} training on {dataset} dataset...")
+    logger.info(
+        f"Starting {config['name']} training on {dataset_name} dataset...")
     logger.info(f"Description: {config['description']}")
 
     # Create systematic output directories: outputs/{dataset}/{model}/{type}/
-    models_dir = get_systematic_output_dir(dataset, model_name, "models")
-    logs_dir = get_systematic_output_dir(dataset, model_name, "logs")
-    results_dir = get_systematic_output_dir(dataset, model_name, "results")
-    images_dir = get_systematic_output_dir(dataset, model_name, "images")
-    metrics_dir = get_systematic_output_dir(dataset, model_name, "metrics")
+    models_dir = get_systematic_output_dir(dataset_name, model_name, "models")
+    logs_dir = get_systematic_output_dir(dataset_name, model_name, "logs")
+    results_dir = get_systematic_output_dir(
+        dataset_name, model_name, "results")
+    images_dir = get_systematic_output_dir(dataset_name, model_name, "images")
+    metrics_dir = get_systematic_output_dir(
+        dataset_name, model_name, "metrics")
     checkpoints_dir = get_systematic_output_dir(
-        dataset, model_name, "checkpoints")
+        dataset_name, model_name, "checkpoints")
 
     logger.info(f"Output directory: {models_dir}")
     logger.info(f"Logs directory: {logs_dir}")
@@ -134,15 +155,15 @@ def train_model(args: argparse.Namespace, logger: logging.Logger) -> bool:
     logger.info(f"Metrics directory: {metrics_dir}")
 
     # Create log file path
-    log_file = logs_dir / f"{model_name}_{dataset}.log"
+    log_file = logs_dir / f"{model_name}_{dataset_name}.log"
 
     try:
         # Import and run the training module
         module = importlib.import_module(config["module"])
 
-        # Prepare training arguments
+        # Prepare training arguments - support both robust and backward compatibility modes
         train_args = {
-            'dataset': dataset,
+            'dataset': dataset_name,
             'output_dir': str(models_dir),
             'log_file': str(log_file),
             'metrics_dir': str(metrics_dir),
@@ -150,6 +171,14 @@ def train_model(args: argparse.Namespace, logger: logging.Logger) -> bool:
             'images_dir': str(images_dir),
             'checkpoints_dir': str(checkpoints_dir)
         }
+
+        # Add robust dataset configuration if using new path-based method
+        if hasattr(args, 'dataset_path') and args.dataset_path:
+            train_args['dataset_path'] = args.dataset_path
+            train_args['validate_dataset'] = getattr(
+                args, 'validate_dataset', False)
+            if hasattr(args, 'num_classes') and args.num_classes:
+                train_args['num_classes'] = args.num_classes
 
         # Add optional arguments if provided
         if hasattr(args, 'epochs') and args.epochs:
@@ -343,17 +372,60 @@ def visualize_results(args: argparse.Namespace, logger: logging.Logger) -> bool:
 
 
 def run_debug(args: argparse.Namespace, logger: logging.Logger) -> bool:
-    """Run debug tests."""
+    """Run debug tests with robust dataset configuration."""
     try:
+        # Handle new dataset specification methods
+        if hasattr(args, 'dataset_path') and args.dataset_path:
+            # Robust mode: using direct dataset path
+            dataset_path = args.dataset_path
+            # Use folder name as dataset identifier
+            dataset_name = Path(dataset_path).name
+            logger.info(f"Debug using dataset path: {dataset_path}")
+
+            # Validate dataset exists
+            if not os.path.exists(dataset_path):
+                logger.error(f"Dataset path does not exist: {dataset_path}")
+                return False
+
+        else:
+            # Backward compatibility mode: using dataset name
+            dataset_name = args.dataset
+            if dataset_name not in get_available_datasets():
+                logger.error(
+                    f"Unknown dataset: {dataset_name}. Available datasets: {list(get_available_datasets().keys())}")
+                return False
+            dataset_path = None  # Will be determined by debug function
+            logger.info(
+                f"Debug using dataset name: {dataset_name} (backward compatibility)")
+
+        # Import debug module and prepare arguments
         from run_debug_sample import main as debug_main
-        debug_main()
+
+        # Create debug configuration arguments
+        debug_config = {
+            'dataset_name': dataset_name,
+            'validate_dataset': getattr(args, 'validate_dataset', False),
+            'sample_size': getattr(args, 'sample_size', 10),
+        }
+
+        # Add robust dataset configuration if using new path-based method
+        if hasattr(args, 'dataset_path') and args.dataset_path:
+            debug_config['dataset_path'] = args.dataset_path
+            if hasattr(args, 'num_classes') and args.num_classes:
+                debug_config['num_classes'] = args.num_classes
+
+        # Run debug with configuration
+        logger.info("🔍 Starting debug tests...")
+        debug_main(**debug_config)
         logger.info("✅ Debug tests completed!")
         return True
+
     except ImportError as e:
         logger.error(f"Failed to import debug module: {e}")
         return False
     except Exception as e:
         logger.error(f"Debug tests failed with error: {e}")
+        logger.exception("Full error details:")
         return False
 
 
@@ -661,8 +733,14 @@ Examples:
     train_parser = subparsers.add_parser('train', help='Train a model')
     train_parser.add_argument('-m', '--model', required=True, choices=list(TRAINING_CONFIGS.keys()),
                               help='Model to train')
-    train_parser.add_argument('-d', '--dataset', required=True, choices=list(get_available_datasets().keys()),
-                              help='Dataset to use')
+
+    # Dataset specification - either by name or path
+    dataset_group = train_parser.add_mutually_exclusive_group(required=True)
+    dataset_group.add_argument('-d', '--dataset', choices=list(get_available_datasets().keys()),
+                               help='Dataset to use (by name)')
+    dataset_group.add_argument('--dataset-path', type=str,
+                               help='Direct path to dataset directory (robust mode)')
+
     train_parser.add_argument('-e', '--epochs', type=int,
                               help='Number of training epochs')
     train_parser.add_argument('-b', '--batch-size', type=int,
@@ -671,6 +749,10 @@ Examples:
         '-lr', '--learning-rate', type=float, help='Learning rate')
     train_parser.add_argument('--device', type=str, default='auto',
                               help='Device to use for training (cpu, cuda, auto, or GPU ID like 0, 1, 2, cuda:0, cuda:1, etc.)')
+    train_parser.add_argument('--num-classes', type=int,
+                              help='Override auto-detected number of classes (for testing)')
+    train_parser.add_argument('--validate-dataset', action='store_true',
+                              help='Validate dataset before training')
 
     # Evaluate command
     eval_parser = subparsers.add_parser(
@@ -704,6 +786,22 @@ Examples:
 
     # Debug command
     debug_parser = subparsers.add_parser('debug', help='Run debug tests')
+
+    # Dataset specification (mutually exclusive options)
+    debug_dataset_group = debug_parser.add_mutually_exclusive_group(
+        required=True)
+    debug_dataset_group.add_argument('-d', '--dataset', choices=list(get_available_datasets().keys()),
+                                     help='Dataset to use (by name)')
+    debug_dataset_group.add_argument('--dataset-path',
+                                     help='Direct path to dataset directory (robust mode)')
+
+    # Debug options
+    debug_parser.add_argument('--validate-dataset', action='store_true',
+                              help='Validate dataset before debugging')
+    debug_parser.add_argument('--num-classes', type=int,
+                              help='Override auto-detected number of classes (for testing)')
+    debug_parser.add_argument('--sample-size', type=int, default=10,
+                              help='Number of samples to analyze for debugging')
 
     # Hyperparameter optimization command
     hyperparam_parser = subparsers.add_parser(

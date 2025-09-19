@@ -95,177 +95,300 @@ python main.py
 
 This launches an interactive menu for all operations.
 
+### 3. Robust Dataset Configuration (NEW!)
+
+The system now supports both traditional dataset names and direct dataset paths for maximum flexibility:
+
+```bash
+# Traditional method (backward compatible)
+python main.py train -m faster_rcnn -d cattlebody
+
+# NEW: Robust method using direct paths (works anywhere!)
+python main.py train -m faster_rcnn --dataset-path /path/to/any/dataset
+
+# With comprehensive validation (recommended)
+python main.py train -m faster_rcnn --dataset-path dataset/cattle --validate-dataset
+```
+
+### 4. CUDA Error Prevention
+
+The system automatically prevents common CUDA device-side assert errors:
+
+```bash
+# Debug your dataset before training (highly recommended)
+python main.py debug --dataset-path dataset/cattle --validate-dataset
+
+# The system will automatically detect and fix:
+# - Class count mismatches
+# - Label range issues
+# - Invalid bounding boxes
+# - Dataset compatibility problems
+```
+
 ## � Command Reference
 
-The system provides several commands with both short and long aliases for convenience:
+The system provides several commands with both short and long aliases for convenience. **NEW**: All training commands now support robust dataset configuration!
 
-### 📋 All Available Commands
+### � **NEW: Robust Dataset Configuration**
 
-| Command          | Description                 | Key Features                                          |
-| ---------------- | --------------------------- | ----------------------------------------------------- |
-| `train`          | Train a model               | Basic training with customizable parameters           |
-| `train-advanced` | Advanced training           | Optimized profiles, augmentation, early stopping      |
-| `evaluate`       | Evaluate a trained model    | Comprehensive metrics and analysis                    |
-| `preprocess`     | Preprocess datasets         | Split data into train/val/test sets                   |
-| `optimize`       | Hyperparameter optimization | Automated parameter tuning                            |
-| `cleanup`        | Clean old metric files      | Remove individual epoch files, keep consolidated data |
-| `info`           | Show system information     | List models, datasets, and project structure          |
+The system now supports two modes for maximum flexibility and portability:
+
+#### **Mode 1: Robust Path-Based (Recommended)**
+
+```bash
+# Works anywhere - just specify the dataset path directly
+python main.py train -m faster_rcnn --dataset-path /absolute/path/to/dataset
+python main.py train -m faster_rcnn --dataset-path ./relative/path/to/dataset
+python main.py train -m faster_rcnn --dataset-path dataset/cattle
+
+# With validation and overrides
+python main.py train -m faster_rcnn --dataset-path dataset/cattle --validate-dataset --num-classes 3
+```
+
+#### **Mode 2: Traditional Name-Based (Backward Compatible)**
+
+```bash
+# Uses predefined dataset names (still works)
+python main.py train -m faster_rcnn -d cattlebody
+python main.py train -m faster_rcnn -d cattleface
+python main.py train -m faster_rcnn -d cattle
+```
+
+### 🛡️ **CUDA Error Prevention System**
+
+**Before training, always run diagnostics to prevent CUDA device-side assert errors:**
+
+```bash
+# Comprehensive dataset diagnostic (HIGHLY RECOMMENDED)
+python main.py debug --dataset-path dataset/cattle --validate-dataset --sample-size 10
+
+# Quick diagnostic check
+python main.py debug --dataset-path dataset/cattle
+
+# Debug with traditional dataset names
+python main.py debug -d cattle --validate-dataset
+```
+
+**The diagnostic system checks for:**
+
+- ✅ CUDA compatibility and GPU status
+- ✅ Dataset structure and file integrity
+- ✅ Label range validation (prevents assert errors)
+- ✅ Class count analysis and recommendations
+- ✅ Bounding box format validation
+- ✅ Model compatibility testing
+
+### �📋 All Available Commands
+
+| Command          | Robust Support | Description                 | Key Features                                          |
+| ---------------- | -------------- | --------------------------- | ----------------------------------------------------- |
+| `train`          | ✅ **NEW**     | Train a model               | Dataset paths, validation, auto-class detection       |
+| `debug`          | ✅ **NEW**     | CUDA error diagnostics      | Comprehensive validation, CUDA error prevention       |
+| `train-advanced` | ✅ **NEW**     | Advanced training           | Path support + optimized profiles, augmentation       |
+| `evaluate`       | ✅ **NEW**     | Evaluate a trained model    | Path support + comprehensive metrics                  |
+| `preprocess`     | ⚠️ Planned     | Preprocess datasets         | Split data into train/val/test sets                   |
+| `optimize`       | ✅ **NEW**     | Hyperparameter optimization | Path support + automated parameter tuning             |
+| `cleanup`        | ➖             | Clean old metric files      | Remove individual epoch files, keep consolidated data |
+| `info`           | ➖             | Show system information     | List models, datasets, and project structure          |
 
 ### 🏷️ Argument Aliases (Short Forms)
 
 For faster command entry, you can use short aliases:
 
-| Long Form           | Short | Description               | Example Values                               |
-| ------------------- | ----- | ------------------------- | -------------------------------------------- |
-| `--model`           | `-m`  | Model architecture        | `faster_rcnn`, `yolov8`, `ultralytics`       |
-| `--dataset`         | `-d`  | Dataset name              | `cattlebody`, `cattleface`                   |
-| `--epochs`          | `-e`  | Number of training epochs | `50`, `100`, `200`                           |
-| `--batch-size`      | `-b`  | Training batch size       | `2`, `4`, `8`, `16`                          |
-| `--learning-rate`   | `-lr` | Learning rate             | `0.001`, `0.002`, `0.01`                     |
-| `--score-threshold` | `-t`  | Confidence threshold      | `0.5`, `0.7`, `0.8`                          |
-| `--output-dir`      | `-o`  | Output directory          | `./custom_output/`                           |
-| `--model-path`      | `-p`  | Specific model path       | `outputs/model.pth`                          |
-| `--split-ratio`     | `-s`  | Train/val split ratio     | `0.7`, `0.8`, `0.9`                          |
-| `--force`           | `-f`  | Force operation           | Used with cleanup/preprocess                 |
-| `--profile`         | `-pr` | Training profile          | `default`, `high_precision`, `fast_training` |
-| `--trials`          | `-tr` | Optimization trials       | `10`, `20`, `50`                             |
-| `--max-epochs`      | `-me` | Maximum epochs            | `100`, `200`, `300`                          |
-| `--augmentation`    | `-a`  | Enable data augmentation  | Boolean flag                                 |
-| `--early-stopping`  | `-es` | Enable early stopping     | Boolean flag                                 |
+| Long Form            | Short | Description                      | Example Values                               |
+| -------------------- | ----- | -------------------------------- | -------------------------------------------- |
+| `--model`            | `-m`  | Model architecture               | `faster_rcnn`, `yolov8`, `ultralytics`       |
+| `--dataset`          | `-d`  | Dataset name (traditional)       | `cattlebody`, `cattleface`, `cattle`         |
+| `--dataset-path`     | N/A   | **NEW**: Direct dataset path     | `dataset/cattle`, `/path/to/data`            |
+| `--validate-dataset` | N/A   | **NEW**: Pre-training validation | Boolean flag (no value needed)               |
+| `--num-classes`      | N/A   | **NEW**: Override class count    | `2`, `3`, `4` (for testing)                  |
+| `--sample-size`      | N/A   | **NEW**: Debug sample count      | `5`, `10`, `20` (for debug command)          |
+| `--epochs`           | `-e`  | Number of training epochs        | `50`, `100`, `200`                           |
+| `--batch-size`       | `-b`  | Training batch size              | `2`, `4`, `8`, `16`                          |
+| `--learning-rate`    | `-lr` | Learning rate                    | `0.001`, `0.002`, `0.01`                     |
+| `--score-threshold`  | `-t`  | Confidence threshold             | `0.5`, `0.7`, `0.8`                          |
+| `--output-dir`       | `-o`  | Output directory                 | `./custom_output/`                           |
+| `--model-path`       | `-p`  | Specific model path              | `outputs/model.pth`                          |
+| `--split-ratio`      | `-s`  | Train/val split ratio            | `0.7`, `0.8`, `0.9`                          |
+| `--force`            | `-f`  | Force operation                  | Used with cleanup/preprocess                 |
+| `--profile`          | `-pr` | Training profile                 | `default`, `high_precision`, `fast_training` |
+| `--trials`           | `-tr` | Optimization trials              | `10`, `20`, `50`                             |
+| `--max-epochs`       | `-me` | Maximum epochs                   | `100`, `200`, `300`                          |
+| `--augmentation`     | `-a`  | Enable data augmentation         | Boolean flag                                 |
+| `--early-stopping`   | `-es` | Enable early stopping            | Boolean flag                                 |
+| `--force`            | `-f`  | Force operation                  | Used with cleanup/preprocess                 |
+| `--profile`          | `-pr` | Training profile                 | `default`, `high_precision`, `fast_training` |
+| `--trials`           | `-tr` | Optimization trials              | `10`, `20`, `50`                             |
+| `--max-epochs`       | `-me` | Maximum epochs                   | `100`, `200`, `300`                          |
+| `--augmentation`     | `-a`  | Enable data augmentation         | Boolean flag                                 |
+| `--early-stopping`   | `-es` | Enable early stopping            | Boolean flag                                 |
 
-### 📝 Command Examples with Explanations
+### 📝 Command Examples
 
-#### 1. **Train Command** - `python main.py train`
+#### 🚀 **NEW: Robust Dataset Training (Recommended)**
 
-Basic training with customizable parameters:
+**Always start with diagnostics to prevent CUDA errors:**
 
 ```bash
-# Basic training (uses default parameters)
-python main.py train -m faster_rcnn -d cattlebody
+# 1. FIRST: Run comprehensive diagnostics (HIGHLY RECOMMENDED)
+python main.py debug --dataset-path dataset/cattle --validate-dataset --sample-size 5
 
-# Customized training with explanations:
-python main.py train \
-    -m faster_rcnn \          # Use Faster R-CNN model
-    -d cattlebody \           # Train on cattle body dataset
-    -e 100 \                  # Train for 100 epochs
-    -b 4 \                    # Use batch size of 4
-    -lr 0.002 \               # Set learning rate to 0.002
-    --device cuda             # Use GPU for training
+# 2. THEN: Train with robust path-based configuration
+python main.py train --dataset-path dataset/cattle -m faster_rcnn --validate-dataset -e 100 -b 4 -lr 0.002
+
+# 3. Advanced robust training with all features
+python main.py train-advanced --dataset-path dataset/cattle -m faster_rcnn --validate-dataset --num-classes 3 -pr high_precision -a -es -me 300
 ```
 
-#### 2. **Train-Advanced Command** - `python main.py train-advanced`
+#### 🔄 **Traditional Training (Backward Compatible)**
 
-Advanced training with optimization features:
+```bash
+# Basic training (your standard command format)
+python main.py train -m faster_rcnn -d cattle -e 2 -b 2 --device cuda:1
+
+# Customized training
+python main.py train -m faster_rcnn -d cattlebody -e 100 -b 4 -lr 0.002 --device cuda
+
+# Advanced training
+python main.py train-advanced -m faster_rcnn -d cattlebody -pr high_precision -a -es -me 300
+```
+
+#### 1. **Debug Command** - `python main.py debug` ⭐ **NEW**
+
+```bash
+# Comprehensive diagnostic (MUST RUN BEFORE TRAINING)
+python main.py debug --dataset-path dataset/cattle --validate-dataset --sample-size 10
+
+# Quick diagnostic check
+python main.py debug --dataset-path dataset/cattle
+
+# Traditional dataset diagnostic
+python main.py debug -d cattle --validate-dataset
+
+# Full diagnostic with overrides
+python main.py debug --dataset-path dataset/cattle --validate-dataset --num-classes 3 --sample-size 5
+```
+
+#### 2. **Train Command** - `python main.py train`
+
+```bash
+# Your standard training command
+python main.py train -m faster_rcnn -d cattle -e 2 -b 2 --device cuda:1
+
+# Robust training with path
+python main.py train --dataset-path dataset/cattle -m faster_rcnn --validate-dataset -e 50 -b 4
+
+# Different models
+python main.py train -m yolov8 -d cattle -e 50 -b 8 --device cuda:0
+python main.py train -m ultralytics -d cattlebody -e 100 -b 16 --device cuda
+```
+
+#### 3. **Train-Advanced Command** - `python main.py train-advanced`
 
 ```bash
 # High precision training (recommended for best results)
-python main.py train-advanced \
-    -m faster_rcnn \          # Use Faster R-CNN model
-    -d cattlebody \           # Train on cattle body dataset
-    -pr high_precision \      # Use high precision profile
-    -a \                      # Enable data augmentation
-    -es \                     # Enable early stopping
-    -me 300                   # Maximum 300 epochs
+python main.py train-advanced --dataset-path dataset/cattle -m faster_rcnn --validate-dataset -pr high_precision -a -es -me 300
 
 # Quick training for experiments
 python main.py train-advanced -m faster_rcnn -d cattlebody -pr fast_training -me 50
 ```
 
-#### 3. **Evaluate Command** - `python main.py evaluate`
+#### 4. **Evaluate Command** - `python main.py evaluate`
 
-Comprehensive model evaluation:
+````bash
+# Robust evaluation with dataset paths
+python main.py evaluate --dataset-path dataset/cattle -m faster_rcnn --validate-dataset -b 4 -t 0.7
+
+# Traditional evaluation
+python main.py evaluate -m faster_rcnn -d cattlebody -b 4 -t 0.7
+```#### 3. **Train-Advanced Command** - `python main.py train-advanced`
+
+Advanced training with optimization features and robust dataset support:
 
 ```bash
-# Basic evaluation
-python main.py evaluate -m faster_rcnn -d cattlebody
+# High precision training (recommended for best results)
+python main.py train-advanced \
+    --dataset-path dataset/cattle \   # NEW: Robust path support
+    -m faster_rcnn \                  # Use Faster R-CNN model
+    --validate-dataset \              # NEW: Pre-training validation
+    -pr high_precision \              # Use high precision profile
+    -a \                              # Enable data augmentation
+    -es \                             # Enable early stopping
+    -me 300                           # Maximum 300 epochs
 
-# Custom evaluation with specific parameters
+# Quick training for experiments (backward compatible)
+python main.py train-advanced -m faster_rcnn -d cattlebody -pr fast_training -me 50
+````
+
+#### 4. **Evaluate Command** - `python main.py evaluate`
+
+Comprehensive model evaluation with robust dataset support:
+
+```bash
+# NEW: Robust evaluation with dataset paths
 python main.py evaluate \
-    -m faster_rcnn \          # Evaluate Faster R-CNN model
-    -d cattlebody \           # Use cattle body test set
-    -b 4 \                    # Batch size 4 for evaluation
-    -t 0.7 \                  # Confidence threshold 0.7
-    -o ./custom_eval/         # Save results to custom directory
+    --dataset-path dataset/cattle \   # Direct dataset path
+    -m faster_rcnn \                  # Evaluate Faster R-CNN model
+    --validate-dataset \              # Validate before evaluation
+    -b 4 \                           # Batch size 4 for evaluation
+    -t 0.7                           # Confidence threshold 0.7
+
+# Traditional evaluation (still works)
+python main.py evaluate -m faster_rcnn -d cattlebody -b 4 -t 0.7
 ```
 
-#### 4. **Preprocess Command** - `python main.py preprocess`
-
-Data preprocessing and splitting:
+#### 5. **Preprocess Command** - `python main.py preprocess`
 
 ```bash
 # Basic preprocessing (80% train, 20% val)
 python main.py preprocess -d cattlebody
 
-# Custom split ratio
-python main.py preprocess \
-    -d cattlebody \           # Process cattle body dataset
-    -s 0.7 \                  # 70% for training, 30% for val/test
-    -f                        # Force reprocess even if exists
+# Custom split ratio with force reprocess
+python main.py preprocess -d cattlebody -s 0.7 -f
 ```
 
-#### 5. **Optimize Command** - `python main.py optimize`
-
-Hyperparameter optimization:
+#### 6. **Optimize Command** - `python main.py optimize`
 
 ```bash
 # Basic hyperparameter optimization
 python main.py optimize -m faster_rcnn -d cattlebody
 
-# Advanced optimization
-python main.py optimize \
-    -m faster_rcnn \          # Optimize Faster R-CNN
-    -d cattlebody \           # Use cattle body dataset
-    -pr high_precision \      # Use high precision profile
-    -tr 20 \                  # Run 20 optimization trials
-    -me 100                   # Max 100 epochs per trial
-```
-
-#### 6. **Cleanup Command** - `python main.py cleanup`
-
-Clean up old metric files:
-
-```bash
-# Clean all metrics directories (dry run first)
-python main.py cleanup --all --dry-run
-
-# Actually clean up (removes individual epoch files)
-python main.py cleanup --all -f
-
-# Clean specific directory
-python main.py cleanup --dir outputs/cattlebody/faster_rcnn/metrics/
-```
-
-#### 7. **Info Command** - `python main.py info`
-
-System information and help:
-
-```bash
-# List available models and datasets
-python main.py info -l
-
-# Show project structure
-python main.py info -s
-
-# Show both
-python main.py info -l -s
+# Advanced optimization with robust paths
+python main.py optimize --dataset-path dataset/cattle -m faster_rcnn -pr high_precision -tr 20 -me 100
 ```
 
 ### 🎯 Recommended Workflows
 
-#### **For Best Results (Recommended)**
+#### 🛡️ **CUDA Error-Free Training (HIGHLY RECOMMENDED)**
 
 ```bash
-# 1. Preprocess data
-python main.py preprocess -d cattlebody -s 0.8
+# 1. ALWAYS start with comprehensive diagnostics
+python main.py debug --dataset-path dataset/cattle --validate-dataset --sample-size 5
 
-# 2. Train with advanced features
-python main.py train-advanced -m faster_rcnn -d cattlebody -pr high_precision -a -es -me 300
+# 2. Train with robust configuration
+python main.py train-advanced --dataset-path dataset/cattle -m faster_rcnn --validate-dataset -pr high_precision -a -es -me 300
 
-# 3. Evaluate the model
-python main.py evaluate -m faster_rcnn -d cattlebody -t 0.5
+# 3. Evaluate with the same robust configuration
+python main.py evaluate --dataset-path dataset/cattle -m faster_rcnn --validate-dataset
+```
 
-# 4. Clean up old files
-python main.py cleanup --all -f
+#### 🚀 **Machine-Portable Training (Works Anywhere)**
+
+```bash
+# Copy your code to any machine and run:
+python main.py debug --dataset-path /path/to/your/dataset --validate-dataset
+python main.py train --dataset-path /path/to/your/dataset -m faster_rcnn --validate-dataset
+python main.py evaluate --dataset-path /path/to/your/dataset -m faster_rcnn
+```
+
+#### 🎯 **Quick Development Workflow**
+
+```bash
+# Your standard quick training
+python main.py train -m faster_rcnn -d cattle -e 2 -b 2 --device cuda:1
+
+# Quick evaluation
+python main.py evaluate -m faster_rcnn -d cattle -t 0.5
 ```
 
 #### **For Quick Experiments**
@@ -318,42 +441,21 @@ python main.py preprocess -d cattleface -s 0.7 -f
 | `yolov8`      | YOLOv8 model                         | Real-time detection     |
 | `ultralytics` | Ultralytics YOLO implementation      | Balanced speed/accuracy |
 
-### Training Commands
-
-#### Faster R-CNN
+### Training Examples
 
 ```bash
-# Basic training
-python main.py train -m faster_rcnn -d cattlebody
+# Your standard training command
+python main.py train -m faster_rcnn -d cattle -e 2 -b 2 --device cuda:1
 
-# Full training with custom parameters
-python main.py train -m faster_rcnn -d cattlebody -e 50 -b 8 -lr 0.001 --device cuda
+# Different models
+python main.py train -m yolov8 -d cattle -e 50 -b 8 --device cuda:0
+python main.py train -m ultralytics -d cattlebody -e 100 -b 16 --device cuda
 
-# Quick test training
-python main.py train -m faster_rcnn -d cattlebody -e 1 -b 2
-```
+# Robust training with validation
+python main.py train --dataset-path dataset/cattle -m faster_rcnn --validate-dataset -e 50 -b 4
 
-#### YOLOv8
-
-```bash
-# Basic training
-python main.py train -m yolov8 -d cattlebody
-
-# Advanced training
-python main.py train -m yolov8 -d cattlebody -e 100 -b 16 -lr 0.01 --device cuda
-
-# Multiple datasets
-python main.py train -m yolov8 -d cattleface -e 50
-```
-
-#### Ultralytics YOLO
-
-```bash
-# Basic training
-python main.py train -m ultralytics -d cattlebody
-
-# Production training
-python main.py train -m ultralytics -d cattlebody -e 200 -b 32 -lr 0.01 --device cuda
+# Advanced training with all features
+python main.py train-advanced --dataset-path dataset/cattle -m faster_rcnn --validate-dataset -pr high_precision -a -es -me 300
 ```
 
 ### Training Output Structure
@@ -378,14 +480,17 @@ outputs/
 
 ## 📈 Model Evaluation
 
-### Comprehensive Evaluation
+### Evaluation Examples
 
 ```bash
-# Evaluate specific model on specific dataset
+# Basic evaluation
 python main.py evaluate -m faster_rcnn -d cattlebody
 
-# Evaluate with custom parameters
+# Custom evaluation with specific parameters
 python main.py evaluate -m faster_rcnn -d cattlebody -b 4 -t 0.7
+
+# Robust evaluation with validation
+python main.py evaluate --dataset-path dataset/cattle -m faster_rcnn --validate-dataset -b 4 -t 0.7
 
 # Standalone evaluation script
 python src/evaluation/evaluate_model.py -m outputs/cattlebody/faster_rcnn/models/faster_rcnn.pth -d cattlebody -o outputs/cattlebody/faster_rcnn/evaluation/
@@ -581,147 +686,7 @@ python main.py train -m faster_rcnn -d cattlebody --device cuda:0
 python main.py train -m faster_rcnn -d cattlebody --device auto
 ```
 
-## 📋 Training Recipes
-
-### Quick Prototyping
-
-```bash
-# Fast iteration for development
-python main.py train -m faster_rcnn -d cattlebody -e 1 -b 2
-```
-
-### Production Training
-
-```bash
-# High-quality model training
-python main.py train -m faster_rcnn -d cattlebody -e 100 -b 16 -lr 0.001
-
-python main.py train -m yolov8 -d cattle -e 2 -b 8 --device cuda:1
-```
-
-    --device cuda
-````
-
-### Comparative Training
-
-```bash
-# Train same dataset with different models
-python main.py train -m faster_rcnn -d cattlebody -e 50
-python main.py train -m yolov8 -d cattlebody -e 50
-python main.py train -m ultralytics -d cattlebody -e 50
-
-# Compare results
-python main.py evaluate -m faster_rcnn -d cattlebody
-python main.py evaluate -m yolov8 -d cattlebody
-python main.py evaluate -m ultralytics -d cattlebody
-```
-
-### 🎯 Short Argument Aliases
-
-For faster CLI usage, the system supports short aliases for common arguments:
-
-| Long Form           | Short Form | Description          |
-| ------------------- | ---------- | -------------------- |
-| `--model`           | `-m`       | Model selection      |
-| `--dataset`         | `-d`       | Dataset selection    |
-| `--epochs`          | `-e`       | Number of epochs     |
-| `--batch-size`      | `-b`       | Batch size           |
-| `--learning-rate`   | `-lr`      | Learning rate        |
-| `--score-threshold` | `-t`       | Confidence threshold |
-| `--output-dir`      | `-o`       | Output directory     |
-| `--model-path`      | `-p`       | Model path           |
-| `--split-ratio`     | `-s`       | Dataset split ratio  |
-| `--force`           | `-f`       | Force processing     |
-| `--profile`         | `-pr`      | Training profile     |
-| `--trials`          | `-tr`      | Optimization trials  |
-| `--max-epochs`      | `-me`      | Maximum epochs       |
-| `--augmentation`    | `-a`       | Enable augmentation  |
-| `--early-stopping`  | `-es`      | Early stopping       |
-
-**Examples:**
-
-```bash
-# Short form - much faster to type
-python main.py train -m faster_rcnn -d cattlebody -e 50 -b 8 -lr 0.001
-
-# Long form - more explicit
-python main.py train --model faster_rcnn --dataset cattlebody --epochs 50 --batch-size 8 --learning-rate 0.001
-
-# Mixed usage (both work)
-python main.py train -m faster_rcnn --dataset cattlebody -e 50 --batch-size 8 -lr 0.001
-```
-
-## 🛠️ Configuration
-
-### Hyperparameter Files
-
-- **Faster R-CNN**: `src/config/hyperparameters.py` → `FASTER_RCNN_PARAMS`
-- **YOLOv8**: `src/config/hyperparameters.py` → `YOLOV8_PARAMS`
-- **Ultralytics**: `src/config/hyperparameters.py` → `ULTRALYTICS_PARAMS`
-
-### Output Configuration
-
-```python
-# Systematic output structure: outputs/{dataset}/{model}/{type}/
-get_systematic_output_dir("cattlebody", "faster_rcnn", "models")
-# Returns: outputs/cattlebody/faster_rcnn/models/
-```
-
-## 📝 Logging
-
-All activities are comprehensively logged:
-
-```
-outputs/{dataset}/{model}/logs/{model}_{dataset}.log
-```
-
-Example log locations:
-
-- `outputs/cattlebody/faster_rcnn/logs/faster_rcnn_cattlebody.log`
-- `outputs/cattleface/yolov8/logs/yolov8_cattleface.log`
-
-## 🐛 Debug and Testing
-
-### Debug Commands
-
-```bash
-# Run debug tests
-python main.py debug
-
-# Debug specific components
-python src/utils/data_validation.py
-python src/utils/model_validation.py
-```
-
-### Memory Management
-
-```bash
-# Monitor GPU memory during training
-python main.py train --model faster_rcnn --dataset cattlebody --monitor-memory
-
-# Force garbage collection
-python main.py train --model faster_rcnn --dataset cattlebody --clean-memory
-```
-
-## 📊 Performance Benchmarks
-
-### Expected Training Times (RTX 3080)
-
-| Model        | Dataset    | Epochs | Batch Size | Time per Epoch | Total Time |
-| ------------ | ---------- | ------ | ---------- | -------------- | ---------- |
-| Faster R-CNN | cattlebody | 50     | 8          | ~4 min         | ~3.3 hours |
-| YOLOv8       | cattlebody | 100    | 16         | ~2 min         | ~3.3 hours |
-| Ultralytics  | cattlebody | 200    | 32         | ~1 min         | ~3.3 hours |
-
-### Expected Performance Metrics
-
-| Model        | Dataset    | mAP@0.5    | mAP@0.5:0.95 | FPS     |
-| ------------ | ---------- | ---------- | ------------ | ------- |
-| Faster R-CNN | cattlebody | ~0.75-0.85 | ~0.45-0.55   | ~15-25  |
-| YOLOv8       | cattlebody | ~0.70-0.80 | ~0.40-0.50   | ~50-100 |
-| Ultralytics  | cattlebody | ~0.72-0.82 | ~0.42-0.52   | ~60-120 |
-
-## 🔧 Development
+## Development
 
 ### Adding New Models
 
@@ -765,6 +730,50 @@ python main.py preprocess --dataset new_dataset
 [Add your license information here]
 
 ## 🆘 Troubleshooting
+
+### 🛡️ **CUDA Error Prevention (NEW)**
+
+#### **CUDA Device-Side Assert Errors**
+
+If you encounter CUDA errors like `"block: [0,0,0], thread: [24,0,0] Assertion 't >= 0 && t < n_classes' failed"`:
+
+```bash
+# 1. IMMEDIATELY run diagnostics to identify the issue
+python main.py debug --dataset-path your/dataset/path --validate-dataset
+
+# 2. Check the diagnostic output:
+#    - Look for "Recommended num_classes: X"
+#    - Check "Label range validation" results
+#    - Verify "Model compatibility testing"
+
+# 3. Fix common issues:
+# Issue: Wrong number of classes
+python main.py train --dataset-path your/dataset --num-classes 3  # Use recommended value
+
+# Issue: Invalid label ranges
+# The diagnostic will show which labels are out of range - fix your dataset
+
+# Issue: Background class problems
+# System automatically handles +1 offset for background class
+```
+
+#### **Prevention Strategy**
+
+```bash
+# ALWAYS run this before ANY training:
+python main.py debug --dataset-path your/dataset --validate-dataset
+
+# Only train if you see: "✅ No critical issues found!"
+```
+
+#### **Diagnostic Output Interpretation**
+
+```bash
+✅ "No critical issues found!" → Safe to train
+⚠️  "Label range issues detected" → Fix dataset labels first
+❌ "CUDA error: device-side assert triggered" → Dataset has invalid labels
+📊 "Recommended num_classes: 3" → Use this value in training
+```
 
 ### Common Issues
 
@@ -828,27 +837,49 @@ python main.py train -m faster_rcnn -d cattlebody -e 1
 
 ## 📚 Quick Reference Commands
 
+### 🚀 **Robust & CUDA-Safe Commands (Recommended)**
+
 ```bash
-# Complete workflow
-python main.py preprocess -d cattlebody
-python main.py train -m faster_rcnn -d cattlebody -e 50
-python main.py evaluate -m faster_rcnn -d cattlebody
-python main.py visualize -m faster_rcnn -d cattlebody
+# Complete robust workflow (works anywhere, prevents CUDA errors)
+python main.py debug --dataset-path dataset/cattle --validate-dataset
+python main.py train --dataset-path dataset/cattle -m faster_rcnn --validate-dataset -e 50 -b 4
+python main.py evaluate --dataset-path dataset/cattle -m faster_rcnn --validate-dataset
 
-# All models on one dataset
-python main.py train -m faster_rcnn -d cattlebody -e 20
-python main.py train -m yolov8 -d cattlebody -e 20
-python main.py train -m ultralytics -d cattlebody -e 20
+# Your standard quick training
+python main.py train -m faster_rcnn -d cattle -e 2 -b 2 --device cuda:1
 
-# One model on all datasets
-python main.py train -m faster_rcnn -d cattlebody -e 20
-python main.py train -m faster_rcnn -d cattleface -e 20
+# Advanced robust training (production-ready)
+python main.py train-advanced --dataset-path dataset/cattle -m faster_rcnn --validate-dataset -pr high_precision -a -es
 
-# Production ready
-python main.py train -m faster_rcnn -d cattlebody -e 100 -b 16
+# Multi-model training
+python main.py train -m faster_rcnn -d cattle -e 20 -b 4 --device cuda:1
+python main.py train -m yolov8 -d cattle -e 20 -b 8 --device cuda:0
+python main.py train -m ultralytics -d cattlebody -e 20 -b 16 --device cuda
 
-python main.py train -m yolov8 -d cattle -e 2 -b 8 --device cuda:1
+# Machine-portable commands (work on any machine)
+python main.py debug --dataset-path /absolute/path/to/data --validate-dataset
+python main.py train --dataset-path /absolute/path/to/data -m faster_rcnn --validate-dataset
 ```
+
+### ⚡ **Quick Commands for Different Use Cases**
+
+```bash
+# 🔍 DEBUGGING: Always run first to prevent CUDA errors
+python main.py debug --dataset-path dataset/cattle --validate-dataset
+
+# 🧪 EXPERIMENTATION: Quick test training
+python main.py train -m faster_rcnn -d cattle -e 5 -b 2 --device cuda:1
+
+# 🎯 PRODUCTION: High-quality training
+python main.py train-advanced --dataset-path dataset/cattle -m faster_rcnn --validate-dataset -pr high_precision -a -es
+
+# 📊 EVALUATION: Comprehensive analysis
+python main.py evaluate --dataset-path dataset/cattle -m faster_rcnn --validate-dataset -t 0.5
+
+# 🚀 OPTIMIZATION: Find best hyperparameters
+python main.py optimize --dataset-path dataset/cattle -m faster_rcnn -tr 10
+```
+````
 
 ```
 
