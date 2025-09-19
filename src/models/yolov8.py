@@ -2,350 +2,254 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
-from torchvision.ops import FeaturePyramidNetwork, nms
+from torchvision.ops import FeaturePyramidNetwork, nms, box_iou, generalized_box_iou
 import traceback
 import logging
 import torch.cuda.amp as amp
 from collections import OrderedDict
+import os
+from PIL import Image
+
 
 class ResNet18_YOLOv8(nn.Module):
-    def __init__(self, num_classes: int, dropout: float = 0.1):
+    def __init__(self, num_classes: int = 2, dropout: float = 0.3):
         super().__init__()
-        
-        # Essential attributes
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.use_amp = torch.cuda.is_available()
-        self.debug = True
-        self.grids = {}
-        self.grid_sizes = [(48, 48), (24, 24), (12, 12)]  # For 384x384 input
-        self.input_size = (384, 384)  # Reduced input size
         self.num_classes = num_classes
-        
-        # Initialize backbone with correct output channels
-        backbone = models.resnet18(weights='DEFAULT')
-        self.layer1 = nn.Sequential(
-            backbone.conv1,
-            backbone.bn1,
-            backbone.relu,
-            backbone.maxpool,
-            backbone.layer1,  # 64 channels
-            backbone.layer2   # 128 channels
+
+        # Backbone: use ResNet18 and keep up to layer4 (conv -> layer4)
+        # Use pretrained=False for older PyTorch versions compatibility
+        backbone = models.resnet18(pretrained=False)
+        self.backbone = nn.Sequential(
+            *list(backbone.children())[:-2])  # keep conv -> layer4
+
+        # Feature map downsample factor (ResNet18 gives stride=32)
+        self.out_channels = 512
+
+        # Detection heads (single-scale)
+        self.box_head = nn.Sequential(
+            nn.Conv2d(self.out_channels, 256, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, 4, kernel_size=1)  # bbox regression: (x, y, w, h)
         )
-        self.layer2 = backbone.layer3  # 256 channels
-        self.layer3 = backbone.layer4  # 512 channels
+        self.cls_head = nn.Sequential(
+            nn.Conv2d(self.out_channels, 256, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
+            nn.Conv2d(256, num_classes, kernel_size=1)  # classification
+        )
 
-        # Add missing backbone_layers attribute
-        self.backbone_layers = [self.layer1, self.layer2, self.layer3]
-        self.num_anchors = 1  # Simplified anchor scheme
-        
-        # Fix channel sizes and FPN
-        self.channels = {
-            'layer3': 512,
-            'layer2': 256,
-            'layer1': 128
-        }
-        
-        # Simpler FPN design
-        self.fpn_convs = nn.ModuleList([
-            nn.Sequential(
-                nn.Conv2d(in_ch, 256, 1),
-                nn.BatchNorm2d(256),
-                nn.ReLU(inplace=True)
-            ) for in_ch in [512, 256, 128]
-        ])
-        
-        # Remove redundant FPN
-        self.fpn = None
-        self.lateral_convs = None
+        # loss criterion instance
+        self.criterion = YOLOLoss(num_classes=num_classes)
 
-        # Update prediction heads for 256 channels
-        self.box_head = nn.ModuleList([
-            nn.Sequential(
-                nn.Conv2d(256, 128, 3, padding=1),
-                nn.BatchNorm2d(128),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(128, 4, 1)
-            ) for _ in range(3)
-        ])
-        
-        self.cls_head = nn.ModuleList([
-            nn.Sequential(
-                nn.Conv2d(256, 128, 3, padding=1),
-                nn.BatchNorm2d(128),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(128, num_classes, 1)
-            ) for _ in range(3)
-        ])
+    def forward(self, x, targets=None):
+        # Feature extraction
+        feats = self.backbone(x)  # [B, 512, H/32, W/32]
 
-        # Remove det_heads as we're using separate box and cls heads
-        self.det_heads = None
+        # Predictions
+        box_preds = self.box_head(feats)   # [B, 4, H/32, W/32]
+        cls_preds = self.cls_head(feats)   # [B, num_classes, H/32, W/32]
 
-        # Initialize weights
-        self._initialize_weights()
-        
-        # Loss weights
-        self.box_weight = 5.0
-        self.cls_weight = 1.0
+        # Flatten
+        B, _, H, W = box_preds.shape
+        box_preds = box_preds.permute(0, 2, 3, 1).reshape(
+            B, -1, 4)          # [B, N, 4]
+        cls_preds = cls_preds.permute(0, 2, 3, 1).reshape(
+            B, -1, self.num_classes)  # [B, N, C]
 
-        self.register_buffer('anchor_grid', torch.zeros(1))  # Add anchor grid buffer
+        # ---- Decode raw outputs (tx,ty,tw,th) -> xyxy in image pixels using grid+stride ----
+        # assume feature map stride relative to input (ResNet18 final stride)
+        stride = 32
+        # create grid centers (0.5 offset), shape [H, W]
+        grid_x = torch.arange(
+            W, device=box_preds.device).repeat(H, 1)  # [H, W]
+        grid_y = torch.arange(H, device=box_preds.device).unsqueeze(
+            1).repeat(1, W)  # [H, W]
+        cx_grid = (grid_x + 0.5) * stride  # [H, W]
+        cy_grid = (grid_y + 0.5) * stride  # [H, W]
+        # flatten and expand to batch: [1, H*W, 1] -> [B, H*W, 1]
+        cx = cx_grid.reshape(1, -1, 1).expand(B, -1, 1)
+        cy = cy_grid.reshape(1, -1, 1).expand(B, -1, 1)
 
-    def _initialize_weights(self):
-        """Initialize weights for better gradient flow"""
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.ones_(m.weight)
-                nn.init.zeros_(m.bias)
+        # tx,ty,tw,th from network
+        tx, ty, tw, th = box_preds.split(1, dim=-1)  # each [B, N, 1]
+        # center decode: sigmoid + grid offset, scaled by stride
+        bx = torch.sigmoid(tx) * stride + cx
+        by = torch.sigmoid(ty) * stride + cy
+        # size decode: exponent and scale by stride
+        bw = torch.exp(tw) * stride
+        bh = torch.exp(th) * stride
 
-    def _init_grid(self, h: int, w: int):
-        """Initialize detection grids"""
-        if f"{h}_{w}" not in self.grids:
-            grid_y, grid_x = torch.meshgrid(
-                torch.arange(h), torch.arange(w), indexing='ij'
-            )
-            grid = torch.stack((grid_x, grid_y), dim=2).float()
-            self.grids[f"{h}_{w}"] = grid.view(1, -1, 2)
+        # xyxy
+        x1 = bx - bw / 2.0
+        y1 = by - bh / 2.0
+        x2 = bx + bw / 2.0
+        y2 = by + bh / 2.0
+        box_preds = torch.cat([x1, y1, x2, y2], dim=-1)  # [B, N, 4]
 
-    def _get_grid(self, h: int, w: int, device: torch.device):
-        """Get grid for given size"""
-        key = f"{h}_{w}"
-        if key not in self.grids:
-            self._init_grid(h, w)
-        return self.grids[key].to(device)
+        if self.training or targets is not None:
+            # training path returns raw preds for external loss
+            return box_preds, cls_preds
+        else:
+            # Inference: return detection-style list of dicts (for evaluate)
+            scores = F.softmax(cls_preds, dim=-1)  # [B, N, C]
+            max_scores, labels = scores.max(dim=-1)  # [B, N]
 
-    def post_process(self, detections, conf_thres=0.25, iou_thres=0.45):
-        """Post process detections with NMS"""
-        processed_dets = []
-        
-        for det in detections:
-            # Reshape detection maps [B, anchors*(5+classes), H, W] -> [B, H, W, anchors, 5+classes]
-            B, C, H, W = det.shape
-            det = det.permute(0, 2, 3, 1).reshape(B, H, W, self.num_anchors, -1)
-            
-            # Extract boxes, scores, classes
-            box_xy = torch.sigmoid(det[..., 0:2])  # center x, y
-            box_wh = torch.exp(det[..., 2:4])  # width, height
-            conf = torch.sigmoid(det[..., 4])  # confidence
-            cls_prob = torch.sigmoid(det[..., 5:])  # class probabilities
-            
-            # Convert to x1y1x2y2 format
-            x1y1 = box_xy - box_wh / 2
-            x2y2 = box_xy + box_wh / 2
-            boxes = torch.cat([x1y1, x2y2], dim=-1)
-            
-            # Filter by confidence
-            conf_mask = conf > conf_thres
-            boxes = boxes[conf_mask]
-            scores = conf[conf_mask] * cls_prob[conf_mask].max(dim=-1)[0]
-            
-            # Apply NMS
-            keep = nms(boxes, scores, iou_thres)
-            processed_dets.append({
-                'boxes': boxes[keep],
-                'scores': scores[keep],
-                'classes': cls_prob[conf_mask][keep].argmax(dim=-1)
-            })
-            
-        return processed_dets
+            detections = []
+            for b in range(B):
+                detections.append({
+                    "boxes": box_preds[b],   # [N, 4] (x1,y1,x2,y2)
+                    "scores": max_scores[b],  # [N]
+                    "labels": labels[b]      # [N]
+                })
+            return detections
 
-    def inference(self, x):
-        """Fixed inference method"""
-        try:
-            # Extract backbone features
-            features = []
-            for layer in self.backbone_layers:
-                x = layer(x)
-                features.append(x)
-            
-            # Process features through FPN
-            fpn_outs = []
-            for i, (feat, fpn_conv) in enumerate(zip(features, self.fpn_convs)):
-                feat = fpn_conv(feat)
-                if i > 0:
-                    feat = feat + F.interpolate(fpn_outs[-1], size=feat.shape[-2:], mode='nearest')
-                fpn_outs.append(feat)
-            
-            # Generate predictions
-            box_preds_list = []
-            cls_preds_list = []
-            
-            for feat, box_head, cls_head in zip(fpn_outs, self.box_head, self.cls_head):
-                box_pred = box_head(feat)
-                cls_pred = cls_head(feat)
-                box_preds_list.append(box_pred)
-                cls_preds_list.append(cls_pred)
-            
-            # Post-process predictions
-            return self.post_process([torch.cat([b, c], dim=1) for b, c in zip(box_preds_list, cls_preds_list)])
-            
-        except Exception as e:
-            print(f"Inference error: {str(e)}")
-            print(traceback.format_exc())
-            return None
+    def compute_loss(self, box_preds, cls_preds, targets):
+        # delegate to criterion
+        return self.criterion(box_preds, cls_preds, targets)
 
-    def _validate_shapes(self, box_preds, cls_preds, target_boxes):
-        """Validate tensor shapes before loss computation"""
-        print(f"[DEBUG] Shape validation:")
-        print(f"  box_preds: {box_preds.shape}")
-        print(f"  cls_preds: {cls_preds.shape}")
-        print(f"  target_boxes: {target_boxes.shape}")
-        
-        if box_preds.dim() != 2 or box_preds.size(-1) != 4:
-            print(f"Invalid box_preds shape: {box_preds.shape}")
-            return False
-        if target_boxes.dim() != 2 or target_boxes.size(-1) != 4:
-            print(f"Invalid target_boxes shape: {target_boxes.shape}")
-            return False
-        return True
+# Add YOLOLoss helper (placed before Dataset)
 
-    def _print_debug(self, msg):
-        if self.debug:
-            print(f"[DEBUG] {msg}")
 
-    def forward(self, images, targets=None):
-        """Forward pass with proper error handling"""
-        try:
-            # Move inputs to correct device and ensure tensor types
-            images = images.to(self.device, non_blocking=True)
-            if targets:
-                targets = [{
-                    'boxes': t['boxes'].to(self.device, dtype=torch.float32, non_blocking=True),
-                    'labels': t['labels'].to(self.device, dtype=torch.long, non_blocking=True)
-                } for t in targets]
+class YOLOLoss(nn.Module):
+    def __init__(self, num_classes, box_weight=5.0, cls_weight=1.0, alpha=0.25, gamma=2.0):
+        super().__init__()
+        self.num_classes = num_classes
+        self.box_weight = box_weight
+        self.cls_weight = cls_weight
+        self.alpha = alpha
+        self.gamma = gamma
 
-            # Extract features
-            x1 = self.layer1(images)  # [B, 128, H/4, W/4]
-            x2 = self.layer2(x1)      # [B, 256, H/8, W/8]
-            x3 = self.layer3(x2)      # [B, 512, H/16, W/16]
-
-            # Simplified FPN pathway
-            features = [x3, x2, x1]
-            fpn_outs = []
-            
-            # Process each level
-            for i, (feat, fpn_conv) in enumerate(zip(features, self.fpn_convs)):
-                feat = fpn_conv(feat)  # Normalize channels to 256
-                if i > 0:  # Upsample and add if not the first level
-                    feat = feat + F.interpolate(fpn_outs[-1], size=feat.shape[-2:], mode='nearest')
-                fpn_outs.append(feat)
-
-            # Generate predictions
-            box_preds_list = []
-            cls_preds_list = []
-            
-            for feat, box_head, cls_head in zip(fpn_outs, self.box_head, self.cls_head):
-                box_pred = box_head(feat)
-                cls_pred = cls_head(feat)
-                
-                B, _, H, W = box_pred.shape
-                box_preds_list.append(box_pred.permute(0, 2, 3, 1).reshape(B, -1, 4))
-                cls_preds_list.append(cls_pred.permute(0, 2, 3, 1).reshape(B, -1, self.num_classes))
-
-            # Concatenate predictions
-            box_preds = torch.cat(box_preds_list, dim=1)
-            cls_preds = torch.cat(cls_preds_list, dim=1)
-
-            return [box_preds, cls_preds], {'boxes': box_preds, 'scores': cls_preds.sigmoid()}
-
-        except Exception as e:
-            print(f"Forward pass error: {str(e)}")
-            print(traceback.format_exc())
-            return None, None
-
-    def _focal_loss(self, inputs: torch.Tensor, targets: torch.Tensor, alpha: float = 0.25, gamma: float = 2.0) -> torch.Tensor:
-        """Compute focal loss for classification"""
-        # Convert inputs to probabilities
-        p = torch.sigmoid(inputs)
-        ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction='none')
+    def focal_loss(self, logits, targets):
+        """
+        Focal loss for multi-class binary classification.
+        logits: [N, C]
+        targets: [N, C] one-hot
+        """
+        p = torch.sigmoid(logits)
+        ce_loss = F.binary_cross_entropy_with_logits(
+            logits, targets, reduction="none")
         p_t = p * targets + (1 - p) * (1 - targets)
-        loss = ce_loss * ((1 - p_t) ** gamma)
-
-        if alpha >= 0:
-            alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
-            loss = alpha_t * loss
-
+        alpha_t = self.alpha * targets + (1 - self.alpha) * (1 - targets)
+        loss = alpha_t * ((1 - p_t) ** self.gamma) * ce_loss
         return loss.sum()
 
-    def compute_loss(self, outputs, targets):
-        """Compute loss with proper gradient handling"""
-        try:
-            box_preds, cls_preds = outputs
-            batch_size = box_preds.size(0)
-            device = box_preds.device
-            batch_loss = torch.zeros(1, device=device, requires_grad=True)
+    def forward(self, box_preds, cls_preds, targets):
+        """
+        box_preds: [B, N, 4] (x1,y1,x2,y2)
+        cls_preds: [B, N, C] (logits)
+        targets: dict of lists {"boxes": [B], "labels": [B]}
+        """
+        device = box_preds.device
+        total_box_loss, total_cls_loss, num_samples = 0.0, 0.0, 0
 
-            for idx in range(batch_size):
-                # Ensure target tensors are properly formatted
-                target_boxes = targets[idx]['boxes'].to(device, dtype=torch.float32)
-                target_labels = targets[idx]['labels'].to(device, dtype=torch.long)
-                
-                if len(target_boxes) == 0:
-                    continue
+        for b in range(len(targets["boxes"])):
+            gt_boxes = targets["boxes"][b].to(device)   # [n_i, 4]
+            gt_labels = targets["labels"][b].to(device)  # [n_i]
+            num_gts = gt_boxes.size(0)
+            if num_gts == 0:
+                continue
 
-                # Calculate IoU and assign targets
-                ious = self._box_iou(box_preds[idx], target_boxes)
-                best_ious, matched_idx = ious.max(dim=1)
-                pos_mask = best_ious > 0.5
+            preds_b = box_preds[b]      # [N, 4]
+            logits_b = cls_preds[b]     # [N, C]
 
-                if pos_mask.any():
-                    num_pos = pos_mask.sum().float().clamp(min=1)
-                    
-                    # Box regression loss
-                    box_loss = F.smooth_l1_loss(
-                        box_preds[idx][pos_mask],
-                        target_boxes[matched_idx[pos_mask]],
-                        reduction='sum'
-                    ) / num_pos * self.box_weight
-                    
-                    # Classification loss
-                    cls_target = torch.zeros_like(cls_preds[idx].squeeze(-1))
-                    cls_target[pos_mask] = target_labels[matched_idx[pos_mask]].float()
-                    cls_loss = F.binary_cross_entropy_with_logits(
-                        cls_preds[idx].squeeze(-1),
-                        cls_target,
-                        reduction='sum'
-                    ) / num_pos * self.cls_weight
-                    
-                    # Accumulate loss with gradient tracking
-                    batch_loss = batch_loss + box_loss + cls_loss
+            # ---- IoU matching ----
+            ious = generalized_box_iou(preds_b, gt_boxes)   # [N, n_i]
+            best_gt_idx = ious.argmax(dim=1)                # best GT per pred
+            best_ious = ious.max(dim=1).values
 
-            return batch_loss / batch_size
+            # ---- dynamic IoU threshold warmup ----
+            current_epoch = getattr(self, "current_epoch", 0)
+            thr = 0.3 + min(current_epoch / 10.0, 1.0) * \
+                (0.5 - 0.3)  # ramp 0.3 → 0.5 over 10 epochs
+            pos_mask = best_ious > thr
 
-        except Exception as e:
-            print(f"Loss computation error: {str(e)}")
-            print(traceback.format_exc())
+            if pos_mask.sum() == 0:
+                continue
+
+            matched_gt = gt_boxes[best_gt_idx[pos_mask]]
+            matched_labels = gt_labels[best_gt_idx[pos_mask]]
+            pred_boxes = preds_b[pos_mask]
+            pred_logits = logits_b[pos_mask]
+
+            # ---- Box regression loss (GIoU) ----
+            giou = generalized_box_iou(
+                pred_boxes, matched_gt).diag()  # [n_pos]
+            box_loss = (1.0 - giou).sum()
+
+            # ---- Classification loss (Focal Loss) ----
+            target_cls = torch.zeros_like(pred_logits, device=device)
+            target_cls[range(len(matched_labels)), matched_labels] = 1.0
+            cls_loss = self.focal_loss(pred_logits, target_cls)
+
+            total_box_loss += box_loss
+            total_cls_loss += cls_loss
+            num_samples += len(matched_gt)
+
+        if num_samples == 0:
             return None
 
-    def _box_iou(self, box1, box2):
-        """Calculate IoU between boxes with gradient support"""
-        # Convert to x1y1x2y2 format if needed
-        if box1.size(-1) == 4:
-            box1_x1y1 = box1[..., :2] - box1[..., 2:] / 2
-            box1_x2y2 = box1[..., :2] + box1[..., 2:] / 2
-            box1 = torch.cat([box1_x1y1, box1_x2y2], dim=-1)
-        
-        # Calculate intersection areas
-        inter = (torch.min(box1[:, None, 2:], box2[None, :, 2:]) - 
-                torch.max(box1[:, None, :2], box2[None, :, :2])).clamp(min=0)
-        inter_area = inter.prod(dim=2)
-        
-        # Calculate union areas
-        box1_area = ((box1[:, 2:] - box1[:, :2])).prod(dim=1)
-        box2_area = ((box2[:, 2:] - box2[:, :2])).prod(dim=1)
-        union = (box1_area[:, None] + box2_area[None, :] - inter_area)
-        
-        return inter_area / (union + 1e-6)
+        loss = (self.box_weight * total_box_loss +
+                self.cls_weight * total_cls_loss) / num_samples
+        return loss
 
-    def cuda(self, device=None):
-        """Override cuda to handle memory efficiently"""
-        device = device or self.device
-        self.device = device
-        super().cuda(device)
-        # Pre-compute grids on GPU
-        for size in self.grid_sizes:
-            self._get_grid(*size, device)
-        torch.cuda.empty_cache()
-        return self
+
+class Dataset(torch.utils.data.Dataset):
+    def __init__(self, image_dir, label_dir, transform=None, target_size=(384, 384)):
+        self.image_dir = image_dir
+        self.label_dir = label_dir
+        self.transform = transform
+        self.target_size = target_size
+        self.images = [f for f in os.listdir(
+            image_dir) if f.lower().endswith((".jpg", ".jpeg", ".png"))]
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        img_name = self.images[idx]
+        img_path = os.path.join(self.image_dir, img_name)
+        lbl_path = os.path.join(
+            self.label_dir, os.path.splitext(img_name)[0] + ".txt")
+
+        # ---- Load image ----
+        img = Image.open(img_path).convert("RGB")
+        orig_w, orig_h = img.size
+        tgt_w, tgt_h = self.target_size
+
+        # ---- Load labels ----
+        boxes, labels = [], []
+        if os.path.exists(lbl_path):
+            with open(lbl_path, "r") as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) != 5:
+                        continue
+                    cls, x, y, w, h = map(float, parts)
+                    cls = int(cls)
+
+                    # YOLO txt gives normalized cx,cy,w,h ∈ [0,1]
+                    cx, cy, bw, bh = x * orig_w, y * orig_h, w * orig_w, h * orig_h
+                    x1, y1 = cx - bw / 2, cy - bh / 2
+                    x2, y2 = cx + bw / 2, cy + bh / 2
+
+                    boxes.append([x1, y1, x2, y2])
+                    labels.append(cls)
+
+        boxes = torch.tensor(boxes, dtype=torch.float32) if boxes else torch.zeros(
+            (0, 4), dtype=torch.float32)
+        labels = torch.tensor(labels, dtype=torch.int64) if labels else torch.zeros(
+            (0,), dtype=torch.int64)
+
+        # ---- Resize image to target ----
+        img = img.resize((tgt_w, tgt_h))
+        if self.transform:
+            img = self.transform(img)
+
+        # ---- Rescale boxes to resized image ----
+        if boxes.numel() > 0:
+            scale_x, scale_y = tgt_w / orig_w, tgt_h / orig_h
+            boxes[:, [0, 2]] *= scale_x
+            boxes[:, [1, 3]] *= scale_y
+
+        target = {"boxes": boxes, "labels": labels}
+        return img, target

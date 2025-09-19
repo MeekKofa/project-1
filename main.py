@@ -24,6 +24,9 @@ Usage Examples:
     # Train on specific GPU
     python main.py train --model faster_rcnn --dataset cattle --device 1
     python main.py train --model yolov8 --dataset cattleface --device cuda:2
+
+
+    python main.py train -m yolov8 -d cattle -e 2 -b 8 --device cuda:1
     
     # Run model evaluation
     python main.py evaluate --model faster_rcnn --dataset cattleface
@@ -69,8 +72,8 @@ def setup_logging(verbose: bool = False) -> logging.Logger:
     """Set up logging configuration."""
     level = logging.DEBUG if verbose else logging.INFO
 
-    # Create outputs directory if it doesn't exist
-    create_output_dir(OUTPUT_LOGS_DIR)
+    # Create logs directory only when setting up logging (this is necessary)
+    OUTPUT_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
     logging.basicConfig(
         level=level,

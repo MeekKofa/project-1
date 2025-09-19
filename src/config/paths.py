@@ -36,8 +36,5 @@ for path in dataset_paths:
     if not os.path.exists(path):
         print(f"Info: Dataset path does not exist yet: {path}")
 
-# Create output directories if they don't exist
-os.makedirs(MODELS_DIR, exist_ok=True)
-os.makedirs(str(OUTPUTS_DIR / "logs"), exist_ok=True)
-os.makedirs(str(OUTPUTS_DIR / "images"), exist_ok=True)
-os.makedirs(str(OUTPUTS_DIR / "results"), exist_ok=True)
+# Note: Output directories are now created on-demand when files are saved
+# This eliminates empty directory creation during import

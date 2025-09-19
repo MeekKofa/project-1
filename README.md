@@ -595,6 +595,8 @@ python main.py train -m faster_rcnn -d cattlebody -e 1 -b 2
 ```bash
 # High-quality model training
 python main.py train -m faster_rcnn -d cattlebody -e 100 -b 16 -lr 0.001
+
+python main.py train -m yolov8 -d cattle -e 2 -b 8 --device cuda:1
 ```
 
     --device cuda
@@ -844,6 +846,8 @@ python main.py train -m faster_rcnn -d cattleface -e 20
 
 # Production ready
 python main.py train -m faster_rcnn -d cattlebody -e 100 -b 16
+
+python main.py train -m yolov8 -d cattle -e 2 -b 8 --device cuda:1
 ```
 
 ```

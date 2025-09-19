@@ -1,23 +1,450 @@
 """
-Comprehensive metrics evaluation module for cattle detection models.
-Supports mAP, precision, recall, F1-score, and other detection metrics.
+Detection metrics for object detection evaluation.
+Clean implementation with mAP calculation integrated with existing comprehensive system.
 """
 
+import matplotlib.pyplot as plt
 import torch
 import numpy as np
-from typing import List, Dict, Tuple, Optional, Any
-import logging
 from collections import defaultdict
-import matplotlib.pyplot as plt
-import seaborn as sns
+import json
+import os
 from pathlib import Path
-import csv
-import pandas as pd
-from datetime import datetime
+import logging
+from typing import Dict, List, Any, Optional
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
 
 logger = logging.getLogger(__name__)
 
 
+class DetectionMetricsSimple:
+    """Clean implementation of detection metrics including mAP (from other project)."""
+
+    def __init__(self, num_classes, iou_threshold=0.5):
+        self.num_classes = num_classes
+        self.iou_threshold = iou_threshold
+        self.reset()
+
+    def reset(self):
+        """Reset all metrics."""
+        self.predictions = []
+        self.targets = []
+
+    def update(self, predictions, targets):
+        """Update metrics with batch predictions and targets.
+
+        Args:
+            predictions: List of dicts with 'boxes', 'scores', 'labels'
+            targets: List of dicts with 'boxes', 'labels'
+        """
+        self.predictions.extend(predictions)
+        self.targets.extend(targets)
+
+    def compute_map(self):
+        """Compute mean Average Precision."""
+        if not self.predictions or not self.targets:
+            return 0.0
+
+        # Collect all predictions and ground truths
+        all_pred_boxes = []
+        all_pred_scores = []
+        all_pred_labels = []
+        all_gt_boxes = []
+        all_gt_labels = []
+        all_image_ids = []
+
+        for i, (pred, gt) in enumerate(zip(self.predictions, self.targets)):
+            if len(pred['boxes']) > 0:
+                all_pred_boxes.append(pred['boxes'].cpu())
+                all_pred_scores.append(pred['scores'].cpu())
+                all_pred_labels.append(pred['labels'].cpu())
+                all_image_ids.extend([i] * len(pred['boxes']))
+
+            if len(gt['boxes']) > 0:
+                all_gt_boxes.append(gt['boxes'].cpu())
+                all_gt_labels.append(gt['labels'].cpu())
+
+        if not all_pred_boxes or not all_gt_boxes:
+            return 0.0
+
+        # Concatenate all predictions and ground truths
+        pred_boxes = torch.cat(all_pred_boxes, dim=0)
+        pred_scores = torch.cat(all_pred_scores, dim=0)
+        pred_labels = torch.cat(all_pred_labels, dim=0)
+
+        # Calculate AP for each class
+        aps = []
+        for class_id in range(self.num_classes):
+            class_pred_mask = pred_labels == class_id
+            if not class_pred_mask.any():
+                continue
+
+            class_pred_boxes = pred_boxes[class_pred_mask]
+            class_pred_scores = pred_scores[class_pred_mask]
+
+            # Get ground truth boxes for this class
+            class_gt_boxes = []
+            for i, gt in enumerate(self.targets):
+                if len(gt['boxes']) > 0:
+                    gt_mask = gt['labels'] == class_id
+                    if gt_mask.any():
+                        class_gt_boxes.append(gt['boxes'][gt_mask].cpu())
+
+            if not class_gt_boxes:
+                continue
+
+            class_gt_boxes = torch.cat(class_gt_boxes, dim=0)
+
+            # Calculate AP for this class
+            ap = self._calculate_ap(
+                class_pred_boxes, class_pred_scores, class_gt_boxes)
+            aps.append(ap)
+
+        return np.mean(aps) if aps else 0.0
+
+    def _calculate_ap(self, pred_boxes, pred_scores, gt_boxes):
+        """Calculate Average Precision for a single class."""
+        if len(pred_boxes) == 0 or len(gt_boxes) == 0:
+            return 0.0
+
+        # Sort predictions by confidence score
+        sorted_indices = torch.argsort(pred_scores, descending=True)
+        pred_boxes = pred_boxes[sorted_indices]
+        pred_scores = pred_scores[sorted_indices]
+
+        tp = torch.zeros(len(pred_boxes))
+        fp = torch.zeros(len(pred_boxes))
+
+        # Track which ground truth boxes have been matched
+        gt_matched = torch.zeros(len(gt_boxes), dtype=torch.bool)
+
+        for i, pred_box in enumerate(pred_boxes):
+            # Calculate IoU with all ground truth boxes
+            ious = self._calculate_iou(pred_box.unsqueeze(0), gt_boxes)
+            max_iou, max_idx = torch.max(ious, dim=1)
+            max_iou = max_iou.item()
+            max_idx = max_idx.item()
+
+            if max_iou >= self.iou_threshold and not gt_matched[max_idx]:
+                tp[i] = 1
+                gt_matched[max_idx] = True
+            else:
+                fp[i] = 1
+
+        # Calculate precision and recall
+        tp_cumsum = torch.cumsum(tp, dim=0)
+        fp_cumsum = torch.cumsum(fp, dim=0)
+
+        precision = tp_cumsum / (tp_cumsum + fp_cumsum + 1e-8)
+        recall = tp_cumsum / len(gt_boxes)
+
+        # Calculate AP using 11-point interpolation
+        ap = self._calculate_ap_11_point(precision, recall)
+        return ap.item()
+
+    def _calculate_iou(self, boxes1, boxes2):
+        """Calculate IoU between two sets of boxes."""
+        # boxes format: [x1, y1, x2, y2]
+        area1 = (boxes1[:, 2] - boxes1[:, 0]) * (boxes1[:, 3] - boxes1[:, 1])
+        area2 = (boxes2[:, 2] - boxes2[:, 0]) * (boxes2[:, 3] - boxes2[:, 1])
+
+        # Calculate intersection
+        x1 = torch.max(boxes1[:, 0:1], boxes2[:, 0:1].T)
+        y1 = torch.max(boxes1[:, 1:2], boxes2[:, 1:2].T)
+        x2 = torch.min(boxes1[:, 2:3], boxes2[:, 2:3].T)
+        y2 = torch.min(boxes1[:, 3:4], boxes2[:, 3:4].T)
+
+        intersection = torch.clamp(x2 - x1, min=0) * \
+            torch.clamp(y2 - y1, min=0)
+        union = area1[:, None] + area2[None, :] - intersection
+
+        return intersection / (union + 1e-8)
+
+    def _calculate_ap_11_point(self, precision, recall):
+        """Calculate AP using 11-point interpolation."""
+        recall_thresholds = torch.linspace(0, 1, 11)
+        ap = torch.zeros(11)
+
+        for i, recall_thresh in enumerate(recall_thresholds):
+            precisions_above_thresh = precision[recall >= recall_thresh]
+            if len(precisions_above_thresh) > 0:
+                ap[i] = torch.max(precisions_above_thresh)
+
+        return torch.mean(ap)
+
+    def get_metrics(self):
+        """Get all computed metrics."""
+        map_50 = self.compute_map()
+        return {
+            'mAP@0.5': map_50,
+            'num_predictions': len(self.predictions),
+            'num_targets': len(self.targets)
+        }
+
+    def save_metrics(self, save_path: str, epoch: int = None, model_type: str = '', dataset: str = ''):
+        """Save metrics to JSON file."""
+        metrics = self.get_metrics()
+
+        # Add metadata
+        metrics['metadata'] = {
+            'epoch': epoch,
+            'model_type': model_type,
+            'dataset': dataset,
+            'iou_threshold': self.iou_threshold,
+            'num_classes': self.num_classes
+        }
+
+        # Create directory only when saving
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+        with open(save_path, 'w') as f:
+            json.dump(metrics, f, indent=2)
+
+        logger.info(f"Metrics saved to {save_path}")
+        return metrics
+
+
+class ComprehensiveMetricsSaver:
+    """Unified metrics saving system following DRY principles."""
+
+    def __init__(self, base_dir: str, model_type: str = '', dataset: str = ''):
+        self.base_dir = Path(base_dir)
+        self.model_type = model_type
+        self.dataset = dataset
+        self.csv_path = self.base_dir / 'training_metrics.csv'
+        # Don't create directories here - only when needed
+
+        # Track training history for plotting
+        self.epoch_metrics = []
+
+    def _ensure_base_dir(self):
+        """Create base directory only when first needed."""
+        if not self.base_dir.exists():
+            self.base_dir.mkdir(parents=True, exist_ok=True)
+
+    def _init_csv(self):
+        """Initialize CSV file with headers if it doesn't exist."""
+        self._ensure_base_dir()  # Create directory only when CSV is needed
+
+        if not self.csv_path.exists():
+            headers = [
+                'timestamp', 'epoch', 'phase', 'loss', 'mAP@0.5', 'mAP@0.75',
+                'mAP@0.5:0.95', 'precision', 'recall', 'f1_score',
+                'num_predictions', 'num_targets', 'model_type', 'dataset'
+            ]
+
+            with open(self.csv_path, 'w', newline='') as f:
+                import csv
+                writer = csv.writer(f)
+                writer.writerow(headers)
+
+    def save_epoch_metrics(self, metrics: dict, epoch: int, loss: float = None, phase: str = 'val'):
+        """Save metrics for a single epoch (lightweight - only CSV)."""
+        import csv
+        from datetime import datetime
+
+        # Initialize CSV if needed
+        if not self.csv_path.exists():
+            self._init_csv()
+
+        # Extract key metrics
+        map50 = metrics.get('mAP@0.5', 0.0)
+        map75 = metrics.get('mAP@0.75', 0.0)
+        map_coco = metrics.get('mAP@0.5:0.95', 0.0)
+        precision = metrics.get('precision@0.5', 0.0)
+        recall = metrics.get('recall@0.5', 0.0)
+        f1 = metrics.get('f1@0.5', 0.0)
+        num_preds = metrics.get('num_predictions', 0)
+        num_targets = metrics.get('num_targets', 0)
+
+        # Store for plotting
+        self.epoch_metrics.append({
+            'epoch': epoch,
+            'loss': loss,
+            'mAP@0.5': map50,
+            'precision': precision,
+            'recall': recall,
+            'f1_score': f1
+        })
+
+        # Write to CSV
+        row = [
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            epoch, phase, loss or 0.0, map50, map75, map_coco,
+            precision, recall, f1, num_preds, num_targets,
+            self.model_type, self.dataset
+        ]
+
+        with open(self.csv_path, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(row)
+
+        logger.info(f"Epoch {epoch} metrics saved to CSV")
+
+    def save_final_metrics(self, metrics: dict, model_path: str = None):
+        """Save comprehensive final metrics with full reports."""
+
+        # Save detailed JSON
+        json_path = self.base_dir / 'final_metrics.json'
+        with open(json_path, 'w') as f:
+            json.dump(metrics, f, indent=2, default=str)
+
+        # Save human-readable report
+        report_path = self.base_dir / 'final_evaluation_report.txt'
+        self._save_detailed_report(metrics, report_path)
+
+        # Create visualizations
+        self._create_training_plots()
+
+        # Save final CSV entry
+        self.save_epoch_metrics(metrics, epoch=None, phase='final')
+
+        logger.info(f"Final metrics saved to {self.base_dir}")
+        return {
+            'json_path': str(json_path),
+            'report_path': str(report_path),
+            'csv_path': str(self.csv_path)
+        }
+
+    def _save_detailed_report(self, metrics: dict, report_path: Path):
+        """Save detailed human-readable evaluation report."""
+        from datetime import datetime
+
+        with open(report_path, 'w') as f:
+            f.write("CATTLE DETECTION - FINAL EVALUATION REPORT\n")
+            f.write("=" * 60 + "\n\n")
+
+            f.write(
+                f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Model: {self.model_type}\n")
+            f.write(f"Dataset: {self.dataset}\n\n")
+
+            # Key metrics
+            f.write("KEY PERFORMANCE METRICS:\n")
+            f.write("-" * 40 + "\n")
+            map50 = metrics.get('mAP@0.5', 0)
+            precision = metrics.get('precision@0.5', 0)
+            recall = metrics.get('recall@0.5', 0)
+            f1 = metrics.get('f1@0.5', 0)
+
+            f.write(f"mAP@0.5       : {map50:.4f} ({map50*100:.2f}%)\n")
+            f.write(
+                f"Precision@0.5 : {precision:.4f} ({precision*100:.2f}%)\n")
+            f.write(f"Recall@0.5    : {recall:.4f} ({recall*100:.2f}%)\n")
+            f.write(f"F1-Score@0.5  : {f1:.4f} ({f1*100:.2f}%)\n\n")
+
+            # Performance assessment
+            f.write("PERFORMANCE ASSESSMENT:\n")
+            f.write("-" * 40 + "\n")
+
+            if map50 >= 0.8:
+                f.write("EXCELLENT: Outstanding cattle detection performance\n")
+            elif map50 >= 0.6:
+                f.write("GOOD: Solid cattle detection with room for improvement\n")
+            elif map50 >= 0.4:
+                f.write("MODERATE: Acceptable but needs optimization\n")
+            else:
+                f.write("POOR: Significant improvement needed\n")
+
+            # Data statistics
+            f.write(f"\nDATASET STATISTICS:\n")
+            f.write("-" * 40 + "\n")
+            f.write(
+                f"Total predictions: {metrics.get('num_predictions', 0):,}\n")
+            f.write(
+                f"Total ground truths: {metrics.get('num_targets', 0):,}\n")
+
+            f.write("\n" + "=" * 60 + "\n")
+
+        logger.info(f"Detailed report saved to {report_path}")
+
+    def _create_training_plots(self):
+        """Create training progress visualizations."""
+        if not self.epoch_metrics:
+            return
+
+        import matplotlib.pyplot as plt
+
+        epochs = [m['epoch']
+                  for m in self.epoch_metrics if m['epoch'] is not None]
+        if not epochs:
+            return
+
+        # Extract metrics
+        losses = [m['loss']
+                  for m in self.epoch_metrics if m['epoch'] is not None]
+        maps = [m['mAP@0.5']
+                for m in self.epoch_metrics if m['epoch'] is not None]
+        precisions = [m['precision']
+                      for m in self.epoch_metrics if m['epoch'] is not None]
+        recalls = [m['recall']
+                   for m in self.epoch_metrics if m['epoch'] is not None]
+
+        # Create subplots
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 8))
+
+        # Loss
+        if any(l is not None for l in losses):
+            ax1.plot(epochs, [l or 0 for l in losses],
+                     'r-', linewidth=2, marker='o')
+            ax1.set_title('Training Loss', fontweight='bold')
+            ax1.set_xlabel('Epoch')
+            ax1.set_ylabel('Loss')
+            ax1.grid(True, alpha=0.3)
+
+        # mAP@0.5
+        ax2.plot(epochs, maps, 'b-', linewidth=2, marker='s')
+        ax2.set_title('mAP@0.5 Progress', fontweight='bold')
+        ax2.set_xlabel('Epoch')
+        ax2.set_ylabel('mAP@0.5')
+        ax2.grid(True, alpha=0.3)
+
+        # Precision
+        ax3.plot(epochs, precisions, 'g-', linewidth=2, marker='^')
+        ax3.set_title('Precision Progress', fontweight='bold')
+        ax3.set_xlabel('Epoch')
+        ax3.set_ylabel('Precision')
+        ax3.grid(True, alpha=0.3)
+
+        # Recall
+        ax4.plot(epochs, recalls, 'm-', linewidth=2, marker='D')
+        ax4.set_title('Recall Progress', fontweight='bold')
+        ax4.set_xlabel('Epoch')
+        ax4.set_ylabel('Recall')
+        ax4.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+
+        plot_path = self.base_dir / 'training_progress.png'
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+        plt.close()
+
+        logger.info(f"Training plots saved to {plot_path}")
+
+    def get_training_summary(self) -> dict:
+        """Get summary of training progress."""
+        if not self.epoch_metrics:
+            return {}
+
+        valid_epochs = [
+            m for m in self.epoch_metrics if m['epoch'] is not None]
+        if not valid_epochs:
+            return {}
+
+        best_map = max(m['mAP@0.5'] for m in valid_epochs)
+        best_epoch = next(m['epoch']
+                          for m in valid_epochs if m['mAP@0.5'] == best_map)
+
+        return {
+            'total_epochs': len(valid_epochs),
+            'best_mAP@0.5': best_map,
+            'best_epoch': best_epoch,
+            'final_mAP@0.5': valid_epochs[-1]['mAP@0.5'] if valid_epochs else 0.0
+        }
+
+
+# Keep existing comprehensive classes for backward compatibility
 class MetricsTracker:
     """
     CSV-based metrics tracker for consolidating training/evaluation metrics.
@@ -555,7 +982,7 @@ class DetectionMetrics:
         print("DETECTION METRICS SUMMARY")
         print("="*60)
 
-        print(f"📊 Dataset Statistics:")
+        print(f"Dataset Statistics:")
         print(f"   • Images evaluated: {len(self.predictions)}")
         print(f"   • Total predictions: {summary.get('num_predictions', 0)}")
         print(
@@ -563,12 +990,12 @@ class DetectionMetrics:
         print(
             f"   • Score threshold: {summary.get('score_threshold', self.score_threshold):.2f}")
 
-        print(f"\n🎯 Average Precision (AP) Metrics:")
+        print(f"\nAverage Precision (AP) Metrics:")
         print(f"   • mAP@0.5      : {summary.get('mAP@0.5', 0):.4f}")
         print(f"   • mAP@0.75     : {summary.get('mAP@0.75', 0):.4f}")
         print(f"   • mAP@0.5:0.95 : {summary.get('mAP@0.5:0.95', 0):.4f}")
 
-        print(f"\n📈 Classification Metrics @ IoU 0.5:")
+        print(f"\nClassification Metrics @ IoU 0.5:")
         print(f"   • Precision    : {summary.get('precision@0.5', 0):.4f}")
         print(f"   • Recall       : {summary.get('recall@0.5', 0):.4f}")
         print(f"   • F1-Score     : {summary.get('f1@0.5', 0):.4f}")
@@ -576,7 +1003,7 @@ class DetectionMetrics:
         # Per-class metrics
         per_class = results.get('per_class_metrics', {})
         if per_class:
-            print(f"\n🔍 Per-Class Metrics @ IoU 0.5:")
+            print(f"\nPer-Class Metrics @ IoU 0.5:")
             for class_id, class_metrics in per_class.items():
                 if 0.5 in class_metrics:
                     metrics = class_metrics[0.5]
@@ -680,26 +1107,26 @@ class DetectionMetrics:
 
         with open(save_path, 'w') as f:
             # Enhanced Header
-            f.write("🐄 CATTLE DETECTION MODEL - EVALUATION REPORT\n")
+            f.write("CATTLE DETECTION MODEL - EVALUATION REPORT\n")
             f.write("=" * 80 + "\n\n")
 
             # Metadata
             f.write(
-                f"📅 Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"💻 System: {platform.system()} {platform.release()}\n")
-            f.write(f"🐍 Python: {platform.python_version()}\n")
+                f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"System: {platform.system()} {platform.release()}\n")
+            f.write(f"Python: {platform.python_version()}\n")
             if model_type:
-                f.write(f"🧠 Model: {model_type}\n")
+                f.write(f"Model: {model_type}\n")
             if dataset:
-                f.write(f"📊 Dataset: {dataset}\n")
+                f.write(f"Dataset: {dataset}\n")
             if epoch is not None:
-                f.write(f"🔄 Epoch: {epoch}\n")
+                f.write(f"Epoch: {epoch}\n")
             else:
-                f.write("✅ Final Evaluation\n")
+                f.write("Final Evaluation\n")
             f.write("\n")
 
             # Dataset Statistics
-            f.write("📊 DATASET STATISTICS:\n")
+            f.write("DATASET STATISTICS:\n")
             f.write("-" * 60 + "\n")
             f.write(f"Images evaluated: {len(self.predictions):,}\n")
             f.write(
@@ -710,7 +1137,7 @@ class DetectionMetrics:
                 f"Score threshold: {summary.get('score_threshold', self.score_threshold):.2f}\n\n")
 
             # Key Performance Metrics
-            f.write("🎯 KEY PERFORMANCE METRICS:\n")
+            f.write("KEY PERFORMANCE METRICS:\n")
             f.write("-" * 60 + "\n")
             map50 = summary.get('mAP@0.5', 0)
             map75 = summary.get('mAP@0.75', 0)
@@ -728,58 +1155,58 @@ class DetectionMetrics:
             f.write(f"F1-Score@0.5  : {f1:.4f} ({f1*100:.2f}%)\n\n")
 
             # Enhanced Performance Interpretation
-            f.write("🔍 PERFORMANCE INTERPRETATION:\n")
+            f.write("PERFORMANCE INTERPRETATION:\n")
             f.write("-" * 60 + "\n")
 
             # Overall performance rating
             if map50 >= 0.85:
-                f.write("🟢 EXCELLENT: Outstanding detection performance\n")
+                f.write("EXCELLENT: Outstanding detection performance\n")
                 improvement_suggestions = [
                     "Fine-tune for edge cases", "Consider ensemble methods"]
             elif map50 >= 0.7:
-                f.write("🟢 VERY GOOD: Strong detection performance\n")
+                f.write("VERY GOOD: Strong detection performance\n")
                 improvement_suggestions = [
                     "Optimize inference speed", "Reduce false positives"]
             elif map50 >= 0.6:
                 f.write(
-                    "🟡 GOOD: Solid detection performance with room for improvement\n")
+                    "GOOD: Solid detection performance with room for improvement\n")
                 improvement_suggestions = [
                     "Hyperparameter tuning", "Data augmentation", "Longer training"]
             elif map50 >= 0.4:
-                f.write("🟠 MODERATE: Acceptable performance, needs optimization\n")
+                f.write("MODERATE: Acceptable performance, needs optimization\n")
                 improvement_suggestions = [
                     "Architecture changes", "Better data quality", "Advanced training techniques"]
             else:
-                f.write("🔴 POOR: Significant improvement needed\n")
+                f.write("POOR: Significant improvement needed\n")
                 improvement_suggestions = [
                     "Review model architecture", "Check data quality", "Increase training duration"]
 
             # Precision analysis
             if precision >= 0.85:
-                f.write("✅ HIGH PRECISION: Excellent false positive control\n")
+                f.write("HIGH PRECISION: Excellent false positive control\n")
             elif precision >= 0.7:
-                f.write("✅ GOOD PRECISION: Good false positive control\n")
+                f.write("GOOD PRECISION: Good false positive control\n")
             else:
-                f.write("⚠️  LOW PRECISION: High false positive rate\n")
+                f.write("LOW PRECISION: High false positive rate\n")
 
             # Recall analysis
             if recall >= 0.85:
-                f.write("✅ HIGH RECALL: Excellent detection coverage\n")
+                f.write("HIGH RECALL: Excellent detection coverage\n")
             elif recall >= 0.7:
-                f.write("✅ GOOD RECALL: Good detection coverage\n")
+                f.write("GOOD RECALL: Good detection coverage\n")
             else:
-                f.write("⚠️  LOW RECALL: Missing many cattle instances\n")
+                f.write("LOW RECALL: Missing many cattle instances\n")
 
             # Balance analysis
             precision_recall_diff = abs(precision - recall)
             if precision_recall_diff < 0.05:
-                f.write("⚖️  BALANCED: Good precision-recall balance\n")
+                f.write("BALANCED: Good precision-recall balance\n")
             elif precision > recall + 0.1:
                 f.write(
-                    "📈 PRECISION-BIASED: Conservative predictions, consider lowering threshold\n")
+                    "PRECISION-BIASED: Conservative predictions, consider lowering threshold\n")
             else:
                 f.write(
-                    "📉 RECALL-BIASED: Aggressive predictions, consider raising threshold\n")
+                    "RECALL-BIASED: Aggressive predictions, consider raising threshold\n")
 
             f.write("\n")
 
@@ -803,7 +1230,7 @@ class DetectionMetrics:
             # IoU Threshold Analysis (Enhanced)
             iou_analysis = results.get('iou_analysis', {})
             if iou_analysis:
-                f.write("🎯 IoU THRESHOLD ANALYSIS:\n")
+                f.write("IoU THRESHOLD ANALYSIS:\n")
                 f.write("-" * 60 + "\n")
                 f.write("Performance across different IoU thresholds:\n\n")
                 f.write("IoU Thresh | Average Precision | Performance Grade\n")
@@ -811,7 +1238,7 @@ class DetectionMetrics:
 
                 for iou_thresh, ap_value in iou_analysis.items():
                     if isinstance(ap_value, (int, float)):
-                        grade = "🟢 Excellent" if ap_value >= 0.7 else "🟡 Good" if ap_value >= 0.5 else "🟠 Moderate" if ap_value >= 0.3 else "🔴 Poor"
+                        grade = "Excellent" if ap_value >= 0.7 else "Good" if ap_value >= 0.5 else "Moderate" if ap_value >= 0.3 else "Poor"
                         f.write(
                             f"   {iou_thresh:.2f}     |     {ap_value:.4f}        | {grade}\n")
                 f.write("\n")
@@ -839,7 +1266,7 @@ class DetectionMetrics:
 
             # Training Progress (if epoch provided)
             if epoch is not None:
-                f.write("📈 TRAINING PROGRESS:\n")
+                f.write("TRAINING PROGRESS:\n")
                 f.write("-" * 60 + "\n")
                 f.write(f"Current epoch: {epoch}\n")
                 f.write(
@@ -848,7 +1275,7 @@ class DetectionMetrics:
 
             f.write("=" * 80 + "\n")
             f.write(
-                "📊 End of Report - Check training_metrics.csv for consolidated tracking\n")
+                "End of Report - Check training_metrics.csv for consolidated tracking\n")
             f.write("=" * 80 + "\n")
 
         logger.info(f"Enhanced evaluation report saved to {save_path}")

@@ -120,11 +120,12 @@ def get_config(config_type: str = "training") -> Dict[str, Any]:
 
 
 def ensure_output_dirs():
-    """Ensure all necessary output directories exist."""
-    OUTPUT_MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    OUTPUT_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    OUTPUT_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    OUTPUT_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    """
+    DEPRECATED: Directory creation is now on-demand.
+    This function is kept for backward compatibility but does nothing.
+    """
+    # Directories are now created only when needed
+    pass
 
 
 def create_output_dir(path: Path) -> Path:
@@ -135,8 +136,11 @@ def create_output_dir(path: Path) -> Path:
 
 def get_systematic_output_dir(dataset_name: str, model_name: str, output_type: str) -> Path:
     """
-    Create systematic output directory following the pattern:
+    Get systematic output directory path following the pattern:
     outputs/{dataset}/{model}/{output_type}/
+
+    NOTE: This now returns the path without creating the directory.
+    Directories are created on-demand when files are actually saved.
 
     Args:
         dataset_name: Name of the dataset (e.g., cattlebody, cattleface)
@@ -144,10 +148,16 @@ def get_systematic_output_dir(dataset_name: str, model_name: str, output_type: s
         output_type: Type of output (models, logs, results, images, metrics, checkpoints)
 
     Returns:
-        Path object for the systematic output directory
+        Path object for the systematic output directory (not created yet)
     """
     base_output_dir = OUTPUTS_DIR / dataset_name / model_name / output_type
-    return create_output_dir(base_output_dir)
+    return base_output_dir  # Return path without creating directory
+
+
+def ensure_dir(path: Path) -> Path:
+    """Create directory only when needed - used for on-demand creation."""
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def get_legacy_output_dir(model_name: str, output_type: str) -> Path:
@@ -188,7 +198,7 @@ def get_legacy_output_dir(model_name: str, output_type: str) -> Path:
         else:
             output_path = OUTPUTS_DIR / output_type
 
-    return create_output_dir(output_path)
+    return output_path  # Return path without creating directory
 
 
 # Alias for backward compatibility
