@@ -878,9 +878,9 @@ python main.py evaluate --dataset-path dataset/cattle -m faster_rcnn --validate-
 
 # 🚀 OPTIMIZATION: Find best hyperparameters
 python main.py optimize --dataset-path dataset/cattle -m faster_rcnn -tr 10
-```
-````
 
+
+python main.py train -m yolov8 -d cattle -e 100 -b 8 --device cuda:0
 ```
 
 ```

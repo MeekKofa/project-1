@@ -282,13 +282,15 @@ def main(dataset_name='cattle', **kwargs):
             os.path.join(base_path, "train", "images"),
             os.path.join(base_path, "train", "labels"),
             transform=transform,
-            target_size=(384, 384)
+            target_size=(YOLOV8_PARAMS['input_size'],
+                         YOLOV8_PARAMS['input_size'])
         )
         val_dataset = CattleDataset(
             os.path.join(base_path, "val", "images"),
             os.path.join(base_path, "val", "labels"),
             transform=transform,
-            target_size=(384, 384)
+            target_size=(YOLOV8_PARAMS['input_size'],
+                         YOLOV8_PARAMS['input_size'])
         )
 
         # add collate function
@@ -315,10 +317,18 @@ def main(dataset_name='cattle', **kwargs):
             num_classes=2, dropout=YOLOV8_PARAMS['dropout'])  # face=0, body=1
         model.to(device)
 
-        optimizer = torch.optim.Adam(
+        optimizer = torch.optim.AdamW(
             [p for p in model.parameters() if p.requires_grad],
             lr=learning_rate,
-            weight_decay=YOLOV8_PARAMS['weight_decay']
+            weight_decay=YOLOV8_PARAMS['weight_decay'],
+            betas=(0.9, 0.999)  # AdamW betas
+        )
+
+        # Cosine annealing scheduler for better convergence
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=num_epochs,
+            eta_min=learning_rate * 0.01  # Minimum learning rate
         )
 
         logger.info(f"Starting training with {num_epochs} epochs...")
@@ -363,6 +373,9 @@ def main(dataset_name='cattle', **kwargs):
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+
+                # Step the scheduler
+                scheduler.step()
 
                 total_loss += float(loss)
                 train_bar.set_postfix(loss=float(loss))

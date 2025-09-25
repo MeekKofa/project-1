@@ -48,16 +48,50 @@ FASTER_RCNN_FAST_TRAINING = {
     'roi_positive_fraction': 0.25
 }
 
-# YOLOv8 training parameters
+# YOLOv8 training parameters - optimized for cattle detection
 YOLOV8_PARAMS = {
-    'batch_size': 2,  # Small batch for 4GB GPU
-    'accumulation_steps': 8,  # Effective batch = 16
-    'learning_rate': 1e-4,
-    'weight_decay': 1e-4,
-    'num_epochs': 100,
-    'input_size': 384,
-    'dropout': 0.1,
-    'warmup_epochs': 3
+    'batch_size': 8,           # Increased from 2 for better gradient estimation
+    'accumulation_steps': 2,   # Effective batch size = 16
+    'learning_rate': 1e-3,     # Increased from 1e-4 for faster convergence
+    'weight_decay': 1e-4,      # L2 regularization
+    'num_epochs': 200,         # Increased from 100 for better convergence
+    'input_size': 416,         # Increased from 384 for better detail capture
+    'dropout': 0.1,            # Dropout for regularization
+    'warmup_epochs': 3,        # Warmup period
+    'optimizer': 'AdamW',      # Better optimizer than Adam
+    'lr_scheduler': 'cosine',  # Cosine annealing for better convergence
+    'momentum': 0.937,         # SGD momentum if using SGD
+    'box_loss_weight': 7.5,    # Box loss weight
+    'cls_loss_weight': 0.5,    # Classification loss weight
+    'dfl_loss_weight': 1.5,    # Distribution focal loss weight
+    'mosaic': 1.0,             # Mosaic augmentation probability
+    'mixup': 0.1,              # Mixup augmentation probability
+    'hsv_h': 0.015,            # HSV-Hue augmentation
+    'hsv_s': 0.7,              # HSV-Saturation augmentation
+    'hsv_v': 0.4,              # HSV-Value augmentation
+    'degrees': 0.0,            # Rotation (disabled for cattle)
+    'translate': 0.1,          # Translation augmentation
+    'scale': 0.5,              # Scale augmentation
+    'shear': 0.0,              # Shear (disabled for cattle)
+    'perspective': 0.0,        # Perspective augmentation
+    'flipud': 0.0,             # Vertical flip
+    'fliplr': 0.5,             # Horizontal flip
+    'bgr': 0.0,                # BGR color space
+    'mosaic_border': [-1, -1],  # Mosaic border
+    'depth_multiple': 0.33,    # Model depth multiplier
+    'width_multiple': 0.25,    # Model width multiplier
+    'backbone': 'resnet18',    # Backbone architecture
+    'amp': True,               # Automatic mixed precision
+    'patience': 50,            # Early stopping patience
+    'save_period': 10,         # Save model every N epochs
+    'project': 'cattle_detection',  # Project name
+    'name': 'yolov8_resnet18',  # Experiment name
+    'conf_thres': 0.001,       # Confidence threshold
+    'iou_thres': 0.6,          # IoU threshold for NMS
+    'max_det': 300,            # Maximum detections per image
+    'save_json': True,         # Save results to JSON
+    'save_txt': True,          # Save results to TXT
+    'save_conf': True          # Save confidences in TXT
 }
 
 # Fusion parameters
