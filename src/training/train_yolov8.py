@@ -16,6 +16,8 @@ from torchmetrics.detection.mean_ap import MeanAveragePrecision
 from PIL import Image
 import argparse
 import traceback
+from pathlib import Path
+from collections import Counter
 
 # project root
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -23,6 +25,74 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def infer_class_distribution(label_dir: str):
+    """Inspect YOLO label files to determine class distribution and mapping."""
+    label_path = Path(label_dir)
+    class_counts = Counter()
+
+    if not label_path.exists():
+        return 1, class_counts, {0: 0}
+
+    for label_file in label_path.glob('*.txt'):
+        try:
+            with open(label_file, 'r') as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) >= 5:
+                        cls_id = int(float(parts[0]))
+                        class_counts[cls_id] += 1
+        except Exception:
+            continue
+
+    if not class_counts:
+        return 1, class_counts, {0: 0}
+
+    sorted_classes = sorted(class_counts.keys())
+    class_mapping = {cls_id: idx for idx, cls_id in enumerate(sorted_classes)}
+    num_classes = len(class_mapping) if class_mapping else 1
+
+    return num_classes, class_counts, class_mapping
+
+
+def remap_boxes_and_labels(boxes, labels, class_mapping, device=None):
+    """Remap original dataset labels to contiguous indices expected by the model."""
+    if labels is None:
+        labels = torch.zeros((0,), dtype=torch.long, device=boxes.device)
+    labels = labels.to(torch.int64)
+
+    if labels.numel() == 0:
+        remapped_boxes = torch.zeros(
+            (0, 4), dtype=boxes.dtype, device=boxes.device)
+        remapped_labels = torch.zeros(
+            (0,), dtype=torch.long, device=boxes.device)
+    else:
+        keep_indices = []
+        mapped_labels = []
+        for idx, label in enumerate(labels.tolist()):
+            mapped = class_mapping.get(int(label))
+            if mapped is not None:
+                keep_indices.append(idx)
+                mapped_labels.append(mapped)
+
+        if keep_indices:
+            index_tensor = torch.tensor(
+                keep_indices, dtype=torch.long, device=boxes.device)
+            remapped_boxes = boxes.index_select(0, index_tensor)
+            remapped_labels = torch.tensor(
+                mapped_labels, dtype=torch.long, device=boxes.device)
+        else:
+            remapped_boxes = torch.zeros(
+                (0, 4), dtype=boxes.dtype, device=boxes.device)
+            remapped_labels = torch.zeros(
+                (0,), dtype=torch.long, device=boxes.device)
+
+    if device is not None:
+        remapped_boxes = remapped_boxes.to(device)
+        remapped_labels = remapped_labels.to(device)
+
+    return remapped_boxes, remapped_labels
 
 # -------- evaluation ----------
 
@@ -129,13 +199,22 @@ def evaluate(model, dataloader, device, conf_thres=0.01, iou_thres=0.6, max_det=
 
 
 # -------- main training function ----------
-def evaluate_with_enhanced_metrics(model, data_loader, device, score_threshold=0.3):
-    """Enhanced evaluation with comprehensive metrics using our custom system."""
+def evaluate_with_enhanced_metrics(model, data_loader, device, num_classes, class_mapping, score_threshold=0.3):
+    """Enhanced evaluation with comprehensive metrics using our custom system.
+
+    Args:
+        model: Trained detection model
+        data_loader: Validation dataloader
+        device: Torch device
+        num_classes: Number of foreground classes (excludes background)
+        class_mapping: Mapping from original dataset labels to contiguous indices
+        score_threshold: Confidence threshold for predictions
+    """
     model.eval()
 
     # Initialize our custom metrics calculator
     metrics_calculator = DetectionMetricsSimple(
-        num_classes=2, iou_threshold=0.5)
+        num_classes=num_classes, iou_threshold=0.5)
 
     with torch.no_grad():
         for images, targets in tqdm(data_loader, desc="Evaluating"):
@@ -147,9 +226,25 @@ def evaluate_with_enhanced_metrics(model, data_loader, device, score_threshold=0
                 single_img = images[i:i+1]  # Keep batch dimension
                 single_target = [targets[i]]
 
+                # Prepare target for model (GPU) and metrics (CPU)
+                target_boxes_gpu, target_labels_gpu = remap_boxes_and_labels(
+                    single_target[0]['boxes'],
+                    single_target[0]['labels'],
+                    class_mapping,
+                    device=device
+                )
+                target_boxes_cpu, target_labels_cpu = remap_boxes_and_labels(
+                    single_target[0]['boxes'],
+                    single_target[0]['labels'],
+                    class_mapping,
+                    device=None
+                )
+
                 # Get model output
-                outputs = model(single_img, {"boxes": [single_target[0]["boxes"].to(device)],
-                                             "labels": [single_target[0]["labels"].to(device)]})
+                outputs = model(single_img, {
+                    "boxes": [target_boxes_gpu],
+                    "labels": [target_labels_gpu]
+                })
                 if outputs is None:
                     # No predictions for this image
                     predictions.append({
@@ -184,12 +279,15 @@ def evaluate_with_enhanced_metrics(model, data_loader, device, score_threshold=0
                     'labels': labels[valid_mask]
                 })
 
-            # Convert targets to proper format
+            # Convert targets to proper format (contiguous label space)
             targets_formatted = []
             for target in targets:
+                boxes_cpu, labels_cpu = remap_boxes_and_labels(
+                    target['boxes'], target['labels'], class_mapping, device=None)
+
                 targets_formatted.append({
-                    'boxes': target['boxes'],
-                    'labels': target['labels']
+                    'boxes': boxes_cpu,
+                    'labels': labels_cpu
                 })
 
             # Update metrics
@@ -278,16 +376,21 @@ def main(dataset_name='cattle', **kwargs):
         logger.info(f"Train path: {train_path}")
         logger.info(f"Val path: {val_path}")
 
+        train_images_dir = os.path.join(base_path, "train", "images")
+        train_labels_dir = os.path.join(base_path, "train", "labels")
+        val_images_dir = os.path.join(base_path, "val", "images")
+        val_labels_dir = os.path.join(base_path, "val", "labels")
+
         train_dataset = CattleDataset(
-            os.path.join(base_path, "train", "images"),
-            os.path.join(base_path, "train", "labels"),
+            train_images_dir,
+            train_labels_dir,
             transform=transform,
             target_size=(YOLOV8_PARAMS['input_size'],
                          YOLOV8_PARAMS['input_size'])
         )
         val_dataset = CattleDataset(
-            os.path.join(base_path, "val", "images"),
-            os.path.join(base_path, "val", "labels"),
+            val_images_dir,
+            val_labels_dir,
             transform=transform,
             target_size=(YOLOV8_PARAMS['input_size'],
                          YOLOV8_PARAMS['input_size'])
@@ -298,6 +401,13 @@ def main(dataset_name='cattle', **kwargs):
             images = torch.stack([x[0] for x in batch])  # [B,C,H,W]
             targets = [x[1] for x in batch]              # list of dicts
             return images, targets
+
+        # Analyze label distribution to determine class count
+        detected_classes, raw_class_counts, class_mapping = infer_class_distribution(
+            train_labels_dir)
+        if raw_class_counts:
+            logger.info(
+                f"Raw label counts (train split): {dict(sorted(raw_class_counts.items()))}")
 
         # Get training parameters from kwargs or defaults
         batch_size = kwargs.get('batch_size', YOLOV8_PARAMS['batch_size'])
@@ -313,8 +423,28 @@ def main(dataset_name='cattle', **kwargs):
         logger.info(f"Train dataset size: {len(train_dataset)}")
         logger.info(f"Val dataset size: {len(val_dataset)}")
 
+        # Infer number of foreground classes (dataset labels are 1-based)
+        inferred_classes = kwargs.get('num_classes')
+        if inferred_classes is None:
+            inferred_classes = detected_classes
+        else:
+            if inferred_classes != detected_classes:
+                logger.warning(
+                    "num_classes override (%d) differs from detected classes (%d); proceeding with override.",
+                    inferred_classes,
+                    detected_classes
+                )
+                # Remap only the classes that fit the requested range
+                selected_classes = sorted(class_mapping.keys())[
+                    :inferred_classes]
+                class_mapping = {cls_id: idx for idx,
+                                 cls_id in enumerate(selected_classes)}
+
+        num_classes = inferred_classes
+        logger.info(f"Detected {num_classes} foreground classes for training")
+
         model = ResNet18_YOLOv8(
-            num_classes=2, dropout=YOLOV8_PARAMS['dropout'])  # face=0, body=1
+            num_classes=num_classes, dropout=YOLOV8_PARAMS['dropout'])
         model.to(device)
 
         optimizer = torch.optim.AdamW(
@@ -347,9 +477,22 @@ def main(dataset_name='cattle', **kwargs):
                 images = images.to(device)
 
                 # convert list-of-dicts -> dict-of-lists and move tensor fields to device
+                processed_boxes = []
+                processed_labels = []
+                for target in targets:
+                    boxes_mapped, labels_mapped = remap_boxes_and_labels(
+                        target["boxes"],
+                        target["labels"],
+                        class_mapping,
+                        device=device
+                    )
+
+                    processed_boxes.append(boxes_mapped)
+                    processed_labels.append(labels_mapped)
+
                 batch_targets = {
-                    "boxes": [t["boxes"].to(device) for t in targets],
-                    "labels": [t["labels"].to(device) for t in targets]
+                    "boxes": processed_boxes,
+                    "labels": processed_labels
                 }
 
                 # outputs is (box_preds, cls_preds)
@@ -385,7 +528,7 @@ def main(dataset_name='cattle', **kwargs):
 
             # ----- Enhanced validation with comprehensive metrics -----
             val_metrics = evaluate_with_enhanced_metrics(
-                model, val_loader, device)
+                model, val_loader, device, num_classes=num_classes, class_mapping=class_mapping)
 
             # Initialize metrics saver lazily - only when we need to save metrics
             if metrics_saver is None:
@@ -405,7 +548,7 @@ def main(dataset_name='cattle', **kwargs):
         # Final comprehensive evaluation and save
         logger.info("Running final comprehensive evaluation...")
         final_metrics = evaluate_with_enhanced_metrics(
-            model, val_loader, device)
+            model, val_loader, device, num_classes=num_classes, class_mapping=class_mapping)
 
         # Save model
         output_dir = kwargs.get('output_dir', './outputs')

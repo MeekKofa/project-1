@@ -11,6 +11,30 @@ import os
 from PIL import Image
 
 
+def _sanitize_boxes(boxes: torch.Tensor, max_size: float = None, eps: float = 1e-6) -> torch.Tensor:
+    """Ensure boxes are valid for IoU computations."""
+    if boxes.numel() == 0:
+        return boxes
+
+    boxes = torch.nan_to_num(boxes, nan=0.0, posinf=1e4, neginf=-1e4)
+
+    x1 = torch.min(boxes[:, 0], boxes[:, 2])
+    y1 = torch.min(boxes[:, 1], boxes[:, 3])
+    x2 = torch.max(boxes[:, 0], boxes[:, 2])
+    y2 = torch.max(boxes[:, 1], boxes[:, 3])
+
+    if max_size is not None:
+        x1 = x1.clamp(min=0.0, max=max_size)
+        y1 = y1.clamp(min=0.0, max=max_size)
+        x2 = x2.clamp(min=0.0, max=max_size)
+        y2 = y2.clamp(min=0.0, max=max_size)
+
+    x2 = torch.clamp(x2, min=x1 + eps)
+    y2 = torch.clamp(y2, min=y1 + eps)
+
+    return torch.stack([x1, y1, x2, y2], dim=-1)
+
+
 class ResNet18_YOLOv8(nn.Module):
     def __init__(self, num_classes: int = 2, dropout: float = 0.3):
         super().__init__()
@@ -72,6 +96,13 @@ class ResNet18_YOLOv8(nn.Module):
 
         # tx,ty,tw,th from network
         tx, ty, tw, th = box_preds.split(1, dim=-1)  # each [B, N, 1]
+
+        # constrain raw predictions to prevent numerical instabilities
+        tx = tx.clamp(min=-10.0, max=10.0)
+        ty = ty.clamp(min=-10.0, max=10.0)
+        tw = tw.clamp(min=-10.0, max=10.0)
+        th = th.clamp(min=-10.0, max=10.0)
+
         # center decode: sigmoid + grid offset, scaled by stride
         bx = torch.sigmoid(tx) * stride + cx
         by = torch.sigmoid(ty) * stride + cy
@@ -79,12 +110,19 @@ class ResNet18_YOLOv8(nn.Module):
         bw = torch.exp(tw) * stride
         bh = torch.exp(th) * stride
 
-        # xyxy
+        # xyxy ordering
         x1 = bx - bw / 2.0
         y1 = by - bh / 2.0
         x2 = bx + bw / 2.0
         y2 = by + bh / 2.0
         box_preds = torch.cat([x1, y1, x2, y2], dim=-1)  # [B, N, 4]
+
+        # ensure valid ordering to avoid downstream assertion errors
+        x_min = torch.minimum(box_preds[..., 0:1], box_preds[..., 2:3])
+        y_min = torch.minimum(box_preds[..., 1:2], box_preds[..., 3:4])
+        x_max = torch.maximum(box_preds[..., 0:1], box_preds[..., 2:3])
+        y_max = torch.maximum(box_preds[..., 1:2], box_preds[..., 3:4])
+        box_preds = torch.cat([x_min, y_min, x_max, y_max], dim=-1)
 
         if self.training or targets is not None:
             # training path returns raw preds for external loss
@@ -164,12 +202,28 @@ class YOLOLoss(nn.Module):
             pos_mask = best_ious > thr
 
             if pos_mask.sum() == 0:
-                continue
+                # fallback: take top matches to provide signal at early epochs
+                valid_ious = best_ious.clamp(min=0)
+                topk = min(5, valid_ious.numel())
+                if topk == 0:
+                    continue
+                top_indices = torch.topk(valid_ious, k=topk).indices
+                # filter out zero IoU selections
+                positive_indices = top_indices[valid_ious[top_indices] > 0]
+                if positive_indices.numel() == 0:
+                    continue
+                pos_indices = positive_indices
+            else:
+                pos_indices = torch.nonzero(
+                    pos_mask, as_tuple=False).squeeze(1)
 
-            matched_gt = gt_boxes[best_gt_idx[pos_mask]]
-            matched_labels = gt_labels[best_gt_idx[pos_mask]]
-            pred_boxes = preds_b[pos_mask]
-            pred_logits = logits_b[pos_mask]
+            matched_gt = gt_boxes[best_gt_idx[pos_indices]]
+            matched_labels = gt_labels[best_gt_idx[pos_indices]]
+            pred_boxes = preds_b[pos_indices]
+            pred_logits = logits_b[pos_indices]
+
+            pred_boxes = _sanitize_boxes(pred_boxes)
+            matched_gt = _sanitize_boxes(matched_gt)
 
             # ---- Box regression loss (GIoU) ----
             giou = generalized_box_iou(
