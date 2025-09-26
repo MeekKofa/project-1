@@ -13,6 +13,7 @@ import os
 import logging
 from torch.nn.utils import clip_grad_norm_
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
+from torch.cuda.amp import autocast, GradScaler
 from PIL import Image
 import argparse
 import traceback
@@ -461,6 +462,14 @@ def main(dataset_name='cattle', **kwargs):
             eta_min=learning_rate * 0.01  # Minimum learning rate
         )
 
+        amp_enabled = kwargs.get('amp', YOLOV8_PARAMS.get('amp', True))
+        scaler = GradScaler(
+            enabled=amp_enabled and device.type in ('cuda', 'mps'))
+        grad_clip = kwargs.get('grad_clip', 10.0)
+
+        logger.info(
+            f"Automatic mixed precision enabled: {scaler.is_enabled()}")
+
         logger.info(f"Starting training with {num_epochs} epochs...")
 
         for epoch in range(num_epochs):
@@ -495,14 +504,16 @@ def main(dataset_name='cattle', **kwargs):
                     "labels": processed_labels
                 }
 
-                # outputs is (box_preds, cls_preds)
-                outputs = model(images, batch_targets)
-                if outputs is None:
-                    continue
+                optimizer.zero_grad(set_to_none=True)
 
-                # unpack outputs and compute loss using model signature
-                box_preds, cls_preds = outputs
-                loss = model.compute_loss(box_preds, cls_preds, batch_targets)
+                with autocast(enabled=scaler.is_enabled()):
+                    outputs = model(images, batch_targets)
+                    if outputs is None:
+                        loss = None
+                    else:
+                        box_preds, cls_preds = outputs
+                        loss = model.compute_loss(
+                            box_preds, cls_preds, batch_targets)
 
                 if loss is None:
                     # skip batches without valid targets
@@ -513,18 +524,23 @@ def main(dataset_name='cattle', **kwargs):
                         "Non-finite loss encountered; skipping batch.")
                     continue
 
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+                scaler.scale(loss).backward()
 
-                # Step the scheduler
-                scheduler.step()
+                if grad_clip is not None and grad_clip > 0:
+                    scaler.unscale_(optimizer)
+                    clip_grad_norm_(model.parameters(), grad_clip)
 
-                total_loss += float(loss)
-                train_bar.set_postfix(loss=float(loss))
+                scaler.step(optimizer)
+                scaler.update()
+
+                loss_value = float(loss.detach())
+                total_loss += loss_value
+                train_bar.set_postfix(loss=loss_value)
 
             avg_loss = total_loss / max(1, len(train_loader))
             logger.info(f"Epoch {epoch+1}: Avg Loss = {avg_loss:.4f}")
+
+            scheduler.step()
 
             # ----- Enhanced validation with comprehensive metrics -----
             val_metrics = evaluate_with_enhanced_metrics(
