@@ -37,6 +37,19 @@ Example usage:
 """
 
 # CRITICAL: Setup Python path FIRST, before any src imports
+from src.models.yolov8.architecture import YOLOv8Model
+from src.utils.logging_utils import setup_logging
+from src.training.trainer import DetectionTrainer
+from src.data.detection_dataset import DetectionDataset
+from src.core.registry import ModelRegistry
+from src.config.training_config import TrainingConfig, parse_args_and_create_config
+import yaml
+import json
+from typing import Dict, Any, Optional
+from torch.utils.data import DataLoader
+import logging
+import torch.nn as nn
+import torch
 import sys
 from pathlib import Path
 
@@ -46,22 +59,9 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 # Now import everything else
-import torch
-import torch.nn as nn
-import logging
-from torch.utils.data import DataLoader
-from typing import Dict, Any, Optional
-import json
-import yaml
 
-from src.config.training_config import TrainingConfig, parse_args_and_create_config
-from src.core.registry import ModelRegistry
-from src.data.detection_dataset import DetectionDataset
-from src.training.trainer import DetectionTrainer
-from src.utils.logging_utils import setup_logging
 
 # Import models to register them
-from src.models.yolov8.architecture import YOLOv8Model
 
 # Add project root to Python path (must be before src imports)
 project_root = Path(__file__).resolve().parents[2]
@@ -322,7 +322,7 @@ def main():
     # Create dataloaders FIRST to auto-detect num_classes
     logger.info("Creating dataloaders...")
     train_loader, val_loader = create_dataloaders(config)
-    
+
     # Auto-detect num_classes from dataset if not provided
     if config['num_classes'] is None:
         # Get num_classes from the dataset
@@ -335,10 +335,12 @@ def main():
             if data_yaml_path.exists():
                 with open(data_yaml_path, 'r') as f:
                     data_info = yaml.safe_load(f)
-                    config['num_classes'] = data_info.get('nc', len(data_info.get('names', [])))
+                    config['num_classes'] = data_info.get(
+                        'nc', len(data_info.get('names', [])))
             else:
                 # Last resort: scan label files
-                logger.warning("Could not auto-detect num_classes, scanning label files...")
+                logger.warning(
+                    "Could not auto-detect num_classes, scanning label files...")
                 max_class = 0
                 label_dir = Path(config['train_labels'])
                 for label_file in label_dir.glob('*.txt'):
@@ -349,7 +351,7 @@ def main():
                                 class_id = int(parts[0])
                                 max_class = max(max_class, class_id)
                 config['num_classes'] = max_class + 1
-        
+
         logger.info(f"Auto-detected num_classes: {config['num_classes']}")
     else:
         logger.info(f"Using provided num_classes: {config['num_classes']}")
