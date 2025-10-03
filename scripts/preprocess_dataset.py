@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 class DatasetPreprocessor:
     """Robust dataset preprocessor using analysis results and config."""
 
-    def __init__(self, config_path: str = "config.yaml"):
+    def __init__(self, config_path: str = "src/config/config.yaml"):
         """Initialize preprocessor with config."""
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
@@ -457,7 +457,7 @@ def main():
     parser.add_argument(
         '--config',
         type=str,
-        default='config.yaml',
+        default='src/config/config.yaml',
         help='Path to config file'
     )
     parser.add_argument(

@@ -65,7 +65,7 @@ class ConfigLoader:
         'conf_thresh': 'confidence_threshold',
     }
 
-    def __init__(self, config_path: str = 'config.yaml', dataset_override: Optional[str] = None):
+    def __init__(self, config_path: str = 'src/config/config.yaml', dataset_override: Optional[str] = None):
         """
         Initialize config loader.
 

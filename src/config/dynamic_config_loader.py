@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class DynamicConfigLoader:
     """Dynamic configuration loader that auto-detects dataset properties."""
 
-    def __init__(self, config_path: str = "config.yaml"):
+    def __init__(self, config_path: str = "src/config/config.yaml"):
         """Load base configuration."""
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
@@ -416,12 +416,12 @@ class DynamicConfigLoader:
         return config
 
 
-def load_config(config_path: str = "config.yaml") -> Dict:
+def load_config(config_path: str = "src/config/config.yaml") -> Dict:
     """
     Load configuration with runtime auto-detection.
 
     Args:
-        config_path: Path to config.yaml
+        config_path: Path to src/config/config.yaml
 
     Returns:
         Dict: Complete configuration with auto-detected properties

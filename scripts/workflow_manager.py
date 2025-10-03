@@ -11,13 +11,16 @@ Usage:
     # Individual stages
     python workflow_manager.py --dataset cattle --stage analyze
     python workflow_manager.py --dataset cattle --stage preprocess
-    python workflow_manager.py --dataset cattle --stage train
+    python workfl        with open('src/config/config.yaml', 'w') as f:
+            yaml.safe_dump(self.config, f, default_flow_style=False)
+
+        logger.info("✅ Updated src/config/config.yaml with profile settings")anager.py --dataset cattle --stage train
     
     # With custom config
     pyt    parser.add_argument(
         '--config',
         type=str,
-        default='config.yaml',
+        default='src/config/config.yaml',
         help='Path to configuration YAML (contains dataset profiles)'
     )rkflow_manager.py --dataset cattlebody --stage preprocess --config config.yaml
 """
@@ -46,7 +49,7 @@ class WorkflowManager:
     def __init__(
         self,
         dataset_name: str,
-        config_path: str = "config.yaml"
+        config_path: str = "src/config/config.yaml"
     ):
         """Initialize workflow manager."""
         self.dataset_name = dataset_name
