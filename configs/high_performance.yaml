@@ -1,0 +1,86 @@
+# High Performance Training Configuration
+# Optimized for maximum accuracy
+
+# Model Configuration
+model: yolov8
+num_classes: 2
+pretrained: false
+freeze_backbone: false
+
+# Dataset Configuration
+dataset_root: dataset/cattlebody
+image_size: 640
+label_format: yolo
+
+# Training Hyperparameters - Optimized
+epochs: 300
+batch_size: 16
+learning_rate: 0.002
+weight_decay: 0.0001
+
+# Optimizer - AdamW with tuned parameters
+optimizer: adamw
+optimizer_params:
+  betas: [0.9, 0.999]
+  eps: 1.0e-8
+  amsgrad: true
+
+# Scheduler - Cosine with warmup
+scheduler: cosine
+scheduler_params:
+  T_max: 300
+  eta_min: 1.0e-7
+
+# Loss Weights - Tuned for better performance
+box_weight: 10.0
+cls_weight: 1.0
+obj_weight: 1.5
+
+# Aggressive Data Augmentation
+augment: true
+augment_params:
+  horizontal_flip: 0.5
+  vertical_flip: 0.2
+  rotation: 15
+  brightness: 0.3
+  contrast: 0.3
+  saturation: 0.3
+  hue: 0.15
+  scale: [0.8, 1.2]
+  translate: 0.1
+
+# Regularization
+dropout: 0.3
+label_smoothing: 0.1
+mixup_alpha: 0.2
+gradient_clip: 1.0
+
+# Training Strategy
+warmup_epochs: 10
+early_stopping: true
+early_stopping_patience: 50
+mixed_precision: true
+
+# Validation
+val_interval: 1
+val_metric: mAP
+
+# Checkpointing
+save_interval: 10
+save_best_only: false
+
+# Output Configuration
+output_dir: outputs
+experiment_name: yolov8_high_performance
+log_interval: 10
+save_predictions: true
+
+# Device Configuration
+device: cuda
+num_workers: 8
+pin_memory: true
+
+# Debugging
+debug: false
+profile: false
+seed: 42

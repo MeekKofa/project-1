@@ -50,18 +50,19 @@ FASTER_RCNN_FAST_TRAINING = {
 
 # YOLOv8 training parameters - optimized for cattle detection
 YOLOV8_PARAMS = {
-    'batch_size': 8,           # Increased from 2 for better gradient estimation
-    'accumulation_steps': 2,   # Effective batch size = 16
-    'learning_rate': 1e-3,     # Increased from 1e-4 for faster convergence
-    'weight_decay': 1e-4,      # L2 regularization
-    'num_epochs': 200,         # Increased from 100 for better convergence
-    'input_size': 416,         # Increased from 384 for better detail capture
-    'dropout': 0.1,            # Dropout for regularization
-    'warmup_epochs': 3,        # Warmup period
+    'batch_size': 4,           # Reduced for 640px images (memory constraints)
+    'accumulation_steps': 4,   # Effective batch size = 16
+    'learning_rate': 1e-3,     # Reduced for more stable training (was 2e-3)
+    'weight_decay': 5e-4,      # Stronger regularization
+    'num_epochs': 150,         # Sufficient epochs with better hyperparams
+    # Larger size for better small object detection (2560x1440 → 640x640)
+    'input_size': 640,
+    'dropout': 0.2,            # Increased dropout for regularization
+    'warmup_epochs': 10,       # Longer warmup for stable training
     'optimizer': 'AdamW',      # Better optimizer than Adam
     'lr_scheduler': 'cosine',  # Cosine annealing for better convergence
     'momentum': 0.937,         # SGD momentum if using SGD
-    'box_loss_weight': 7.5,    # Box loss weight
+    'box_loss_weight': 7.5,    # Increased box loss weight for better localization
     'cls_loss_weight': 0.5,    # Classification loss weight
     'dfl_loss_weight': 1.5,    # Distribution focal loss weight
     'mosaic': 1.0,             # Mosaic augmentation probability

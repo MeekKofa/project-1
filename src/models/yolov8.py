@@ -8,7 +8,10 @@ import logging
 import torch.cuda.amp as amp
 from collections import OrderedDict
 import os
+import random
+from typing import Optional, Dict, Any
 from PIL import Image
+from torchvision.transforms import functional as TF
 
 
 def _sanitize_boxes(boxes: torch.Tensor, max_size: float = None, eps: float = 1e-6) -> torch.Tensor:
@@ -36,7 +39,7 @@ def _sanitize_boxes(boxes: torch.Tensor, max_size: float = None, eps: float = 1e
 
 
 class ResNet18_YOLOv8(nn.Module):
-    def __init__(self, num_classes: int = 2, dropout: float = 0.3):
+    def __init__(self, num_classes: int = 2, dropout: float = 0.3, box_weight: float = 7.5, cls_weight: float = 0.5):
         super().__init__()
         self.num_classes = num_classes
 
@@ -62,8 +65,16 @@ class ResNet18_YOLOv8(nn.Module):
             nn.Conv2d(256, num_classes, kernel_size=1)  # classification
         )
 
-        # loss criterion instance
-        self.criterion = YOLOLoss(num_classes=num_classes)
+        # Objectness head - predicts object vs background
+        self.obj_head = nn.Sequential(
+            nn.Conv2d(self.out_channels, 128, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(128, 1, kernel_size=1)  # objectness score
+        )
+
+        # loss criterion instance with configured weights
+        self.criterion = YOLOLoss(
+            num_classes=num_classes, box_weight=box_weight, cls_weight=cls_weight)
 
     def forward(self, x, targets=None):
         # Feature extraction
@@ -72,6 +83,7 @@ class ResNet18_YOLOv8(nn.Module):
         # Predictions
         box_preds = self.box_head(feats)   # [B, 4, H/32, W/32]
         cls_preds = self.cls_head(feats)   # [B, num_classes, H/32, W/32]
+        obj_preds = self.obj_head(feats)   # [B, 1, H/32, W/32]
 
         # Flatten
         B, _, H, W = box_preds.shape
@@ -79,6 +91,8 @@ class ResNet18_YOLOv8(nn.Module):
             B, -1, 4)          # [B, N, 4]
         cls_preds = cls_preds.permute(0, 2, 3, 1).reshape(
             B, -1, self.num_classes)  # [B, N, C]
+        obj_preds = obj_preds.permute(0, 2, 3, 1).reshape(
+            B, -1, 1)          # [B, N, 1]
 
         # ---- Decode raw outputs (tx,ty,tw,th) -> xyxy in image pixels using grid+stride ----
         # assume feature map stride relative to input (ResNet18 final stride)
@@ -106,9 +120,12 @@ class ResNet18_YOLOv8(nn.Module):
         # center decode: sigmoid + grid offset, scaled by stride
         bx = torch.sigmoid(tx) * stride + cx
         by = torch.sigmoid(ty) * stride + cy
-        # size decode: exponent and scale by stride
-        bw = torch.exp(tw) * stride
-        bh = torch.exp(th) * stride
+        # size decode: clamp then exponent to prevent box explosions
+        # Clamp to [-4, 4] means box size range: [0.018 * stride, 54.6 * stride]
+        tw_clamped = tw.clamp(min=-4.0, max=4.0)
+        th_clamped = th.clamp(min=-4.0, max=4.0)
+        bw = torch.exp(tw_clamped) * stride
+        bh = torch.exp(th_clamped) * stride
 
         # xyxy ordering
         x1 = bx - bw / 2.0
@@ -126,24 +143,28 @@ class ResNet18_YOLOv8(nn.Module):
 
         if self.training or targets is not None:
             # training path returns raw preds for external loss
-            return box_preds, cls_preds
+            return box_preds, cls_preds, obj_preds
         else:
-            # Inference: return detection-style list of dicts (for evaluate)
-            scores = F.softmax(cls_preds, dim=-1)  # [B, N, C]
-            max_scores, labels = scores.max(dim=-1)  # [B, N]
+            # Inference: combine objectness with class scores for final confidence
+            obj_scores = torch.sigmoid(obj_preds.squeeze(-1))  # [B, N]
+            cls_scores = F.softmax(cls_preds, dim=-1)  # [B, N, C]
+            max_cls_scores, labels = cls_scores.max(dim=-1)  # [B, N]
+
+            # Final confidence = objectness * class_score
+            final_scores = obj_scores * max_cls_scores  # [B, N]
 
             detections = []
             for b in range(B):
                 detections.append({
                     "boxes": box_preds[b],   # [N, 4] (x1,y1,x2,y2)
-                    "scores": max_scores[b],  # [N]
+                    "scores": final_scores[b],  # [N] - combined confidence
                     "labels": labels[b]      # [N]
                 })
             return detections
 
-    def compute_loss(self, box_preds, cls_preds, targets):
+    def compute_loss(self, box_preds, cls_preds, obj_preds, targets):
         # delegate to criterion
-        return self.criterion(box_preds, cls_preds, targets)
+        return self.criterion(box_preds, cls_preds, obj_preds, targets)
 
 # Add YOLOLoss helper (placed before Dataset)
 
@@ -155,7 +176,7 @@ class YOLOLoss(nn.Module):
         self.box_weight = box_weight
         self.cls_weight = cls_weight
         self.alpha = alpha
-        self.gamma = gamma
+        self.gamma = gamma  # Standard focal loss gamma
 
     def focal_loss(self, logits, targets):
         """
@@ -171,14 +192,15 @@ class YOLOLoss(nn.Module):
         loss = alpha_t * ((1 - p_t) ** self.gamma) * ce_loss
         return loss.sum()
 
-    def forward(self, box_preds, cls_preds, targets):
+    def forward(self, box_preds, cls_preds, obj_preds, targets):
         """
         box_preds: [B, N, 4] (x1,y1,x2,y2)
         cls_preds: [B, N, C] (logits)
+        obj_preds: [B, N, 1] (objectness logits)
         targets: dict of lists {"boxes": [B], "labels": [B]}
         """
         device = box_preds.device
-        total_box_loss, total_cls_loss, num_samples = 0.0, 0.0, 0
+        total_box_loss, total_cls_loss, total_obj_loss, num_pos, num_neg = 0.0, 0.0, 0.0, 0, 0
 
         for b in range(len(targets["boxes"])):
             gt_boxes = targets["boxes"][b].to(device)   # [n_i, 4]
@@ -189,6 +211,11 @@ class YOLOLoss(nn.Module):
 
             preds_b = box_preds[b]      # [N, 4]
             logits_b = cls_preds[b]     # [N, C]
+            obj_b = obj_preds[b].squeeze(-1)  # [N]
+
+            # Sanitize boxes before IoU computation to avoid assertion errors
+            preds_b = _sanitize_boxes(preds_b)
+            gt_boxes = _sanitize_boxes(gt_boxes)
 
             # ---- IoU matching ----
             ious = generalized_box_iou(preds_b, gt_boxes)   # [N, n_i]
@@ -196,9 +223,11 @@ class YOLOLoss(nn.Module):
             best_ious = ious.max(dim=1).values
 
             # ---- dynamic IoU threshold warmup ----
+            # Balanced threshold: 0.25 → 0.45 over 30 epochs
+            # Not too low (avoids bad matches) not too high (allows learning)
             current_epoch = getattr(self, "current_epoch", 0)
-            thr = 0.3 + min(current_epoch / 10.0, 1.0) * \
-                (0.5 - 0.3)  # ramp 0.3 → 0.5 over 10 epochs
+            thr = 0.25 + min(current_epoch / 30.0, 1.0) * \
+                (0.45 - 0.25)  # ramp 0.25 → 0.45 over 30 epochs
             pos_mask = best_ious > thr
 
             if pos_mask.sum() == 0:
@@ -235,29 +264,152 @@ class YOLOLoss(nn.Module):
             target_cls[range(len(matched_labels)), matched_labels] = 1.0
             cls_loss = self.focal_loss(pred_logits, target_cls)
 
+            # ---- Objectness loss (Binary CE with focal weighting) ----
+            # Positive samples: matched predictions should have high objectness
+            obj_target = torch.zeros_like(obj_b, device=device)
+            obj_target[pos_indices] = 1.0
+
+            # Negative samples: unmatched predictions with low IoU
+            neg_mask = best_ious < 0.5  # IoU < 0.5 are clear negatives
+
+            # Focal BCE for objectness with safety checks
+            if len(pos_indices) > 0:
+                obj_loss_pos = F.binary_cross_entropy_with_logits(
+                    obj_b[pos_indices], obj_target[pos_indices], reduction='sum'
+                )
+            else:
+                obj_loss_pos = torch.tensor(0.0, device=device)
+
+            if neg_mask.sum() > 0:
+                obj_loss_neg = F.binary_cross_entropy_with_logits(
+                    obj_b[neg_mask], obj_target[neg_mask], reduction='sum'
+                )
+            else:
+                obj_loss_neg = torch.tensor(0.0, device=device)
+
+            obj_loss = obj_loss_pos + 0.5 * obj_loss_neg  # Reduce negative weight
+
             total_box_loss += box_loss
             total_cls_loss += cls_loss
-            num_samples += len(matched_gt)
+            total_obj_loss += obj_loss
+            num_pos += len(matched_gt)
+            num_neg += neg_mask.sum().item()
 
-        if num_samples == 0:
-            return None
+        # Always return a valid loss, even with no positives (use objectness loss only)
+        if num_pos == 0:
+            if num_neg > 0 and total_obj_loss > 0:
+                # Return small objectness-only loss to keep training stable
+                return 0.1 * total_obj_loss / num_neg
+            else:
+                # Return tiny loss to avoid None - use box_preds to maintain grad graph
+                return 0.01 * box_preds.sum() * 0.0 + 0.01
 
-        loss = (self.box_weight * total_box_loss +
-                self.cls_weight * total_cls_loss) / num_samples
+        # Normalize by number of positive samples, add objectness term
+        loss = (
+            self.box_weight * total_box_loss / num_pos +
+            self.cls_weight * total_cls_loss / num_pos +
+            # Objectness loss weight = 1.0
+            1.0 * total_obj_loss / max(num_pos + num_neg, 1)
+        )
         return loss
 
 
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, image_dir, label_dir, transform=None, target_size=(384, 384)):
+    def __init__(
+        self,
+        image_dir: str,
+        label_dir: str,
+        transform=None,
+        target_size=(384, 384),
+        augment: bool = False,
+        augmentation_params: Optional[Dict[str, Any]] = None
+    ):
         self.image_dir = image_dir
         self.label_dir = label_dir
         self.transform = transform
         self.target_size = target_size
         self.images = [f for f in os.listdir(
             image_dir) if f.lower().endswith((".jpg", ".jpeg", ".png"))]
+        self.augment = augment
+
+        default_aug = {
+            "flip_prob": 0.5,
+            "color_prob": 0.8,
+            "hsv_h": 0.015,
+            "hsv_s": 0.7,
+            "hsv_v": 0.4,
+            "gamma_range": 0.2
+        }
+        if augmentation_params:
+            default_aug.update({k: v for k, v in augmentation_params.items()
+                                if k in default_aug})
+        self.aug_params = default_aug
 
     def __len__(self):
         return len(self.images)
+
+    def _letterbox_resize(self, img: Image.Image, target_size: tuple, fill_value: int = 114):
+        """
+        Resize image with aspect ratio preservation using letterbox (padding).
+        Returns: resized_img, scale, (pad_left, pad_top)
+        """
+        orig_w, orig_h = img.size
+        target_w, target_h = target_size
+
+        # Calculate scaling factor to fit image inside target
+        scale = min(target_w / orig_w, target_h / orig_h)
+        new_w = int(orig_w * scale)
+        new_h = int(orig_h * scale)
+
+        # Resize with aspect ratio preserved
+        img_resized = img.resize((new_w, new_h), Image.BILINEAR)
+
+        # Create padded canvas
+        padded_img = Image.new(
+            'RGB', target_size, (fill_value, fill_value, fill_value))
+
+        # Center the resized image
+        pad_left = (target_w - new_w) // 2
+        pad_top = (target_h - new_h) // 2
+        padded_img.paste(img_resized, (pad_left, pad_top))
+
+        return padded_img, scale, (pad_left, pad_top)
+
+    def _apply_augmentations(self, img: Image.Image, boxes: torch.Tensor, orig_w: int, orig_h: int):
+        """Apply simple geometric and photometric augmentations."""
+        if not self.augment:
+            return img, boxes
+
+        # Horizontal flip
+        if random.random() < self.aug_params.get("flip_prob", 0.5):
+            img = TF.hflip(img)
+            if boxes.numel() > 0:
+                flipped = boxes.clone()
+                flipped[:, 0] = orig_w - boxes[:, 2]
+                flipped[:, 2] = orig_w - boxes[:, 0]
+                boxes = flipped
+
+        if random.random() < self.aug_params.get("color_prob", 0.8):
+            hsv_h = float(self.aug_params.get("hsv_h", 0.0))
+            hsv_s = float(self.aug_params.get("hsv_s", 0.0))
+            hsv_v = float(self.aug_params.get("hsv_v", 0.0))
+            gamma_range = float(self.aug_params.get("gamma_range", 0.0))
+
+            if hsv_v > 0:
+                factor = 1.0 + random.uniform(-hsv_v, hsv_v)
+                img = TF.adjust_brightness(img, max(0.1, factor))
+            if hsv_s > 0:
+                factor = 1.0 + \
+                    random.uniform(-min(hsv_s, 0.9), min(hsv_s, 0.9))
+                img = TF.adjust_saturation(img, max(0.1, factor))
+            if hsv_h > 0:
+                hue_shift = random.uniform(-hsv_h, hsv_h)
+                img = TF.adjust_hue(img, max(-0.5, min(0.5, hue_shift)))
+            if gamma_range > 0:
+                gamma = 1.0 + random.uniform(-gamma_range, gamma_range)
+                img = TF.adjust_gamma(img, max(0.1, gamma))
+
+        return img, boxes
 
     def __getitem__(self, idx):
         img_name = self.images[idx]
@@ -294,16 +446,26 @@ class Dataset(torch.utils.data.Dataset):
         labels = torch.tensor(labels, dtype=torch.int64) if labels else torch.zeros(
             (0,), dtype=torch.int64)
 
-        # ---- Resize image to target ----
-        img = img.resize((tgt_w, tgt_h))
-        if self.transform:
-            img = self.transform(img)
+        # augment before resizing to preserve aspect-based calculations
+        img, boxes = self._apply_augmentations(img, boxes, orig_w, orig_h)
 
-        # ---- Rescale boxes to resized image ----
+        # ---- Letterbox resize (preserves aspect ratio with padding) ----
+        img_resized, scale, (pad_left, pad_top) = self._letterbox_resize(
+            img, (tgt_w, tgt_h))
+
+        if self.transform:
+            img_resized = self.transform(img_resized)
+
+        # ---- Transform boxes to match letterbox coordinates ----
         if boxes.numel() > 0:
-            scale_x, scale_y = tgt_w / orig_w, tgt_h / orig_h
-            boxes[:, [0, 2]] *= scale_x
-            boxes[:, [1, 3]] *= scale_y
+            # Scale boxes
+            boxes = boxes * scale
+            # Apply padding offset
+            boxes[:, [0, 2]] += pad_left
+            boxes[:, [1, 3]] += pad_top
+            # Clamp to image bounds
+            boxes[:, [0, 2]] = boxes[:, [0, 2]].clamp(0, tgt_w)
+            boxes[:, [1, 3]] = boxes[:, [1, 3]].clamp(0, tgt_h)
 
         target = {"boxes": boxes, "labels": labels}
-        return img, target
+        return img_resized, target

@@ -1360,9 +1360,32 @@ def evaluate_model(model, dataloader, device, score_threshold=0.5, num_classes=2
     return results, metrics
 
 
+# Standalone compute_map function for backward compatibility
+def compute_map(predictions, targets, iou_threshold=0.5, num_classes=2):
+    """
+    Standalone function to compute mAP from predictions and targets.
+
+    Args:
+        predictions: List of prediction dicts with 'boxes', 'scores', 'labels'
+        targets: List of target dicts with 'boxes', 'labels'
+        iou_threshold: IoU threshold for positive matches (default: 0.5)
+        num_classes: Number of classes including background (default: 2)
+
+    Returns:
+        float: Mean Average Precision value
+    """
+    metrics = DetectionMetricsSimple(
+        num_classes=num_classes, iou_threshold=iou_threshold)
+    metrics.update(predictions, targets)
+    return metrics.compute_map()
+
+
 # Export commonly used functions
 __all__ = [
     'DetectionMetrics',
+    'DetectionMetricsSimple',
     'MetricsTracker',
-    'evaluate_model'
+    'ComprehensiveMetricsSaver',
+    'evaluate_model',
+    'compute_map'
 ]

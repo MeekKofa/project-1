@@ -4,6 +4,7 @@ from src.config.hyperparameters import YOLOV8_PARAMS
 from src.models.yolov8 import ResNet18_YOLOv8, Dataset as CattleDataset, YOLOLoss
 from src.evaluation.metrics import DetectionMetricsSimple, ComprehensiveMetricsSaver
 import torch
+import torch.nn.functional as F
 from torch.utils.data import Dataset as BaseDataset, DataLoader
 from torchvision import transforms
 from torchvision.ops import nms
@@ -19,6 +20,7 @@ import argparse
 import traceback
 from pathlib import Path
 from collections import Counter
+import math
 
 # project root
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -200,7 +202,7 @@ def evaluate(model, dataloader, device, conf_thres=0.01, iou_thres=0.6, max_det=
 
 
 # -------- main training function ----------
-def evaluate_with_enhanced_metrics(model, data_loader, device, num_classes, class_mapping, score_threshold=0.3):
+def evaluate_with_enhanced_metrics(model, data_loader, device, num_classes, class_mapping, score_threshold=0.25):
     """Enhanced evaluation with comprehensive metrics using our custom system.
 
     Args:
@@ -221,33 +223,16 @@ def evaluate_with_enhanced_metrics(model, data_loader, device, num_classes, clas
         for images, targets in tqdm(data_loader, desc="Evaluating"):
             images = images.to(device)
 
-            # Get predictions from model
+            # Get predictions from model in INFERENCE mode (no targets)
             predictions = []
             for i in range(len(images)):
                 single_img = images[i:i+1]  # Keep batch dimension
-                single_target = [targets[i]]
 
-                # Prepare target for model (GPU) and metrics (CPU)
-                target_boxes_gpu, target_labels_gpu = remap_boxes_and_labels(
-                    single_target[0]['boxes'],
-                    single_target[0]['labels'],
-                    class_mapping,
-                    device=device
-                )
-                target_boxes_cpu, target_labels_cpu = remap_boxes_and_labels(
-                    single_target[0]['boxes'],
-                    single_target[0]['labels'],
-                    class_mapping,
-                    device=None
-                )
+                # Run inference without targets (model.eval() is already called)
+                outputs = model(single_img, targets=None)
 
-                # Get model output
-                outputs = model(single_img, {
-                    "boxes": [target_boxes_gpu],
-                    "labels": [target_labels_gpu]
-                })
+                # Handle None case
                 if outputs is None:
-                    # No predictions for this image
                     predictions.append({
                         'boxes': torch.empty((0, 4), device=device),
                         'scores': torch.empty((0,), device=device),
@@ -255,27 +240,41 @@ def evaluate_with_enhanced_metrics(model, data_loader, device, num_classes, clas
                     })
                     continue
 
-                box_preds, cls_preds = outputs
+                # Model in eval mode returns list of dicts: [{'boxes': ..., 'scores': ..., 'labels': ...}]
+                # Since batch_size=1, get first detection
+                if isinstance(outputs, list):
+                    # Inference mode: list of detections
+                    detection = outputs[0]
+                    boxes = detection['boxes']
+                    scores = detection['scores']
+                    labels = detection['labels']
+                else:
+                    # Training mode: tuple of (box_preds, cls_preds, obj_preds)
+                    # This shouldn't happen since model.eval() was called, but handle it anyway
+                    box_preds, cls_preds, obj_preds = outputs
 
-                # Convert predictions to detection format
-                if box_preds.numel() == 0 or cls_preds.numel() == 0:
-                    predictions.append({
-                        'boxes': torch.empty((0, 4), device=device),
-                        'scores': torch.empty((0,), device=device),
-                        'labels': torch.empty((0,), dtype=torch.long, device=device)
-                    })
-                    continue
+                    if box_preds.numel() == 0 or cls_preds.numel() == 0:
+                        predictions.append({
+                            'boxes': torch.empty((0, 4), device=device),
+                            'scores': torch.empty((0,), device=device),
+                            'labels': torch.empty((0,), dtype=torch.long, device=device)
+                        })
+                        continue
 
-                # Apply score threshold
-                scores = torch.sigmoid(cls_preds.max(
-                    dim=-1)[0])  # Get max class score
-                labels = cls_preds.max(dim=-1)[1]  # Get predicted class
+                    # Convert raw predictions to detection format with objectness
+                    obj_scores = torch.sigmoid(obj_preds.squeeze(-1))  # [1, N]
+                    cls_probs = F.softmax(cls_preds, dim=-1)  # [1, N, C]
+                    max_probs, pred_labels = cls_probs.max(dim=-1)  # [1, N]
+                    # Combined score = objectness * class_score
+                    scores = (obj_scores * max_probs).squeeze(0)  # [N]
+                    labels = pred_labels.squeeze(0)  # [N]
+                    boxes = box_preds.squeeze(0)  # [N, 4]
 
-                # Filter by score threshold
+                # Filter by score threshold (outside if/else, applies to both paths)
                 valid_mask = scores > score_threshold
 
                 predictions.append({
-                    'boxes': box_preds[valid_mask],
+                    'boxes': boxes[valid_mask],
                     'scores': scores[valid_mask],
                     'labels': labels[valid_mask]
                 })
@@ -382,19 +381,33 @@ def main(dataset_name='cattle', **kwargs):
         val_images_dir = os.path.join(base_path, "val", "images")
         val_labels_dir = os.path.join(base_path, "val", "labels")
 
+        augmentation_config = {
+            "flip_prob": YOLOV8_PARAMS.get('fliplr', 0.5),
+            "color_prob": 0.75,
+            "hsv_h": YOLOV8_PARAMS.get('hsv_h', 0.015),
+            "hsv_s": YOLOV8_PARAMS.get('hsv_s', 0.5),
+            "hsv_v": YOLOV8_PARAMS.get('hsv_v', 0.3),
+            "gamma_range": 0.2
+        }
+
+        # Use 640x640 for better detection quality (original images are 2560x1440)
+        target_img_size = kwargs.get('image_size', 640)
+        logger.info(
+            f"Using target image size: {target_img_size}x{target_img_size}")
+
         train_dataset = CattleDataset(
             train_images_dir,
             train_labels_dir,
             transform=transform,
-            target_size=(YOLOV8_PARAMS['input_size'],
-                         YOLOV8_PARAMS['input_size'])
+            target_size=(target_img_size, target_img_size),
+            augment=True,
+            augmentation_params=augmentation_config
         )
         val_dataset = CattleDataset(
             val_images_dir,
             val_labels_dir,
             transform=transform,
-            target_size=(YOLOV8_PARAMS['input_size'],
-                         YOLOV8_PARAMS['input_size'])
+            target_size=(target_img_size, target_img_size)
         )
 
         # add collate function
@@ -445,7 +458,11 @@ def main(dataset_name='cattle', **kwargs):
         logger.info(f"Detected {num_classes} foreground classes for training")
 
         model = ResNet18_YOLOv8(
-            num_classes=num_classes, dropout=YOLOV8_PARAMS['dropout'])
+            num_classes=num_classes,
+            dropout=YOLOV8_PARAMS['dropout'],
+            box_weight=YOLOV8_PARAMS.get('box_loss_weight', 7.5),
+            cls_weight=YOLOV8_PARAMS.get('cls_loss_weight', 0.5)
+        )
         model.to(device)
 
         optimizer = torch.optim.AdamW(
@@ -455,10 +472,12 @@ def main(dataset_name='cattle', **kwargs):
             betas=(0.9, 0.999)  # AdamW betas
         )
 
-        # Cosine annealing scheduler for better convergence
+        warmup_epochs = kwargs.get(
+            'warmup_epochs', YOLOV8_PARAMS.get('warmup_epochs', 0))
+        cosine_epochs = max(1, num_epochs - warmup_epochs)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer,
-            T_max=num_epochs,
+            T_max=cosine_epochs,
             eta_min=learning_rate * 0.01  # Minimum learning rate
         )
 
@@ -466,11 +485,27 @@ def main(dataset_name='cattle', **kwargs):
         scaler = GradScaler(
             enabled=amp_enabled and device.type in ('cuda', 'mps'))
         grad_clip = kwargs.get('grad_clip', 10.0)
+        accumulation_steps = max(
+            1, kwargs.get('accumulation_steps', YOLOV8_PARAMS.get('accumulation_steps', 1)))
+
+        best_map = 0.0
+        best_epoch = -1
+        best_model_path = None
+        output_dir = kwargs.get('output_dir', './outputs')
+        os.makedirs(output_dir, exist_ok=True)
+        latest_model_path = os.path.join(
+            output_dir, f'{dataset_name}_yolov8_latest.pth')
+        best_output_path = os.path.join(
+            output_dir, f'{dataset_name}_yolov8_best.pth')
 
         logger.info(
             f"Automatic mixed precision enabled: {scaler.is_enabled()}")
 
         logger.info(f"Starting training with {num_epochs} epochs...")
+
+        steps_per_epoch = math.ceil(len(train_loader) / accumulation_steps)
+        logger.info(
+            f"Using gradient accumulation x{accumulation_steps} (~{steps_per_epoch} optimizer steps/epoch)")
 
         for epoch in range(num_epochs):
             # inform loss object of current epoch for dynamic IoU warmup
@@ -478,10 +513,26 @@ def main(dataset_name='cattle', **kwargs):
                 model.criterion.current_epoch = epoch
             model.train()
             total_loss = 0.0
+            num_valid_batches = 0
             train_bar = tqdm(
                 train_loader, desc=f"Epoch {epoch+1}/{num_epochs}")
 
-            for images, targets in train_bar:
+            # Warmup: scale learning rate linearly for first warmup epochs
+            # Start from 50% of target LR instead of near-zero to prevent slow start
+            if warmup_epochs > 0 and epoch < warmup_epochs:
+                lr_scale = 0.5 + 0.5 * \
+                    float(epoch + 1) / float(max(1, warmup_epochs))
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = learning_rate * lr_scale
+                logger.info(
+                    f"Warmup epoch {epoch+1}/{warmup_epochs}: LR scaled to {optimizer.param_groups[0]['lr']:.6f}")
+            else:
+                logger.info(
+                    f"Epoch {epoch+1}: LR {optimizer.param_groups[0]['lr']:.6f}")
+
+            optimizer.zero_grad(set_to_none=True)
+
+            for batch_idx, (images, targets) in enumerate(train_bar):
                 # move images to device (single op as requested)
                 images = images.to(device)
 
@@ -504,43 +555,46 @@ def main(dataset_name='cattle', **kwargs):
                     "labels": processed_labels
                 }
 
-                optimizer.zero_grad(set_to_none=True)
-
                 with autocast(enabled=scaler.is_enabled()):
                     outputs = model(images, batch_targets)
                     if outputs is None:
-                        loss = None
+                        raw_loss = None
                     else:
-                        box_preds, cls_preds = outputs
-                        loss = model.compute_loss(
-                            box_preds, cls_preds, batch_targets)
+                        box_preds, cls_preds, obj_preds = outputs
+                        raw_loss = model.compute_loss(
+                            box_preds, cls_preds, obj_preds, batch_targets)
 
-                if loss is None:
-                    # skip batches without valid targets
-                    continue
-
-                if not torch.isfinite(loss):
+                # raw_loss should never be None now, but keep finite check
+                if raw_loss is None or not torch.isfinite(raw_loss):
                     logger.warning(
-                        "Non-finite loss encountered; skipping batch.")
+                        f"Invalid loss encountered (None or non-finite); skipping batch.")
                     continue
 
+                loss = raw_loss / accumulation_steps
                 scaler.scale(loss).backward()
 
-                if grad_clip is not None and grad_clip > 0:
-                    scaler.unscale_(optimizer)
-                    clip_grad_norm_(model.parameters(), grad_clip)
+                should_step = ((batch_idx + 1) % accumulation_steps == 0) or (
+                    batch_idx + 1 == len(train_loader))
 
-                scaler.step(optimizer)
-                scaler.update()
+                if should_step:
+                    if grad_clip is not None and grad_clip > 0:
+                        scaler.unscale_(optimizer)
+                        clip_grad_norm_(model.parameters(), grad_clip)
 
-                loss_value = float(loss.detach())
+                    scaler.step(optimizer)
+                    scaler.update()
+                    optimizer.zero_grad(set_to_none=True)
+
+                loss_value = float(raw_loss.detach())
                 total_loss += loss_value
+                num_valid_batches += 1
                 train_bar.set_postfix(loss=loss_value)
 
-            avg_loss = total_loss / max(1, len(train_loader))
+            avg_loss = total_loss / max(1, num_valid_batches)
             logger.info(f"Epoch {epoch+1}: Avg Loss = {avg_loss:.4f}")
 
-            scheduler.step()
+            if num_epochs > 0 and (warmup_epochs == 0 or epoch >= warmup_epochs):
+                scheduler.step()
 
             # ----- Enhanced validation with comprehensive metrics -----
             val_metrics = evaluate_with_enhanced_metrics(
@@ -561,22 +615,40 @@ def main(dataset_name='cattle', **kwargs):
             map50 = val_metrics.get('mAP@0.5', 0)
             logger.info(f"Validation: mAP50={map50:.4f}")
 
+            if map50 > best_map:
+                best_map = map50
+                best_epoch = epoch + 1
+                best_model_path = best_output_path
+                torch.save(model.state_dict(), best_model_path)
+                logger.info(
+                    f"New best model at epoch {best_epoch} with mAP50={best_map:.4f}; saved to {best_model_path}")
+
+            torch.save(model.state_dict(), latest_model_path)
+
         # Final comprehensive evaluation and save
+        if best_model_path and os.path.exists(best_model_path):
+            logger.info(
+                f"Loading best model from epoch {best_epoch} for final evaluation: {best_model_path}")
+            model.load_state_dict(torch.load(
+                best_model_path, map_location=device))
+
         logger.info("Running final comprehensive evaluation...")
         final_metrics = evaluate_with_enhanced_metrics(
             model, val_loader, device, num_classes=num_classes, class_mapping=class_mapping)
 
-        # Save model
-        output_dir = kwargs.get('output_dir', './outputs')
-        model_path = os.path.join(output_dir, f'{dataset_name}_yolov8.pth')
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
-        torch.save(model.state_dict(), model_path)
-        logger.info(f"Model saved to {model_path}")
+        final_model_path = os.path.join(
+            output_dir, f'{dataset_name}_yolov8.pth')
+        torch.save(model.state_dict(), final_model_path)
+        logger.info(f"Model saved to {final_model_path}")
+
+        if best_epoch > 0:
+            final_metrics['best_epoch'] = best_epoch
+            final_metrics['best_map@0.5'] = best_map
 
         # Save final comprehensive metrics only if we have metrics to save
         if metrics_saver is not None:
             saved_paths = metrics_saver.save_final_metrics(
-                final_metrics, model_path)
+                final_metrics, final_model_path)
             logger.info(f"Final metrics saved to: {saved_paths}")
         else:
             # No epoch metrics were saved, so just log final results
