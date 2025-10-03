@@ -1,0 +1,281 @@
+# Universal Training Configuration
+# Dynamic, modular config for cattle detection training
+# Auto-detects: num_classes, class_names, image/label counts at runtime
+
+# ============================================================================
+# ACTIVE PRESET - Change this to switch training modes quickly
+# ============================================================================
+active_preset: standard # Options: quick_test, standard, high_performance, custom
+
+# ============================================================================
+# DATASET CONFIGURATION
+# ============================================================================
+dataset:
+  name: cattlebody # Options: cattle, cattlebody, cattleface
+  split: raw # Options: raw, processed
+  root: dataset/${dataset.name} # Auto-constructed path
+  format: auto # auto-detect format (yolo, coco, voc)
+
+  # Dataset properties detected at runtime - DO NOT SET MANUALLY
+  # num_classes: auto-detected
+  # class_names: auto-detected
+  # splits: auto-detected
+
+# ============================================================================
+# MODEL CONFIGURATION
+# ============================================================================
+model:
+  name: yolov8 # Options: yolov8, faster_rcnn
+  pretrained: false
+  freeze_backbone: false
+
+# ============================================================================
+# TRAINING HYPERPARAMETERS
+# ============================================================================
+train:
+  epochs: 100
+  batch_size: 8
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  momentum: 0.9
+
+  # Optimizer
+  optimizer: adamw # Options: sgd, adam, adamw, rmsprop
+  optimizer_params:
+    betas: [0.9, 0.999]
+    eps: 1.0e-8
+
+# ============================================================================
+# PREPROCESSING (Applied before training)
+# ============================================================================
+preprocess:
+  enabled: true
+  target_size: [640, 640] # Resize all images to this size (640 for standard, 1280 for small objects)
+  maintain_aspect: true # Use letterboxing to maintain aspect ratio
+  normalize: true # Normalize to [0, 1]
+  format: yolo # Output format for preprocessed data
+
+  # Image quality filters
+  min_image_size: [320, 320] # Filter out images smaller than this (detection minimum)
+  max_image_size: null # Filter out images larger than this (null = no limit)
+
+  # Label quality filters
+  min_bbox_size: 0.001 # Minimum bbox area (normalized)
+  filter_invalid_boxes: true # Remove boxes outside image bounds
+
+# ============================================================================
+# DATA AUGMENTATION (Applied during training)
+# ============================================================================
+augmentation:
+  enabled: true
+
+  # Geometric augmentations
+  horizontal_flip: 0.5
+  vertical_flip: 0.0
+  rotation: 10 # degrees
+  scale: [0.8, 1.2]
+  translate: 0.1 # fraction of image
+  shear: 0.0 # degrees
+
+  # Color augmentations
+  brightness: 0.2 # +/- 20%
+  contrast: 0.2
+  saturation: 0.2
+  hue: 0.1
+
+  # Advanced augmentations
+  mosaic: true # Mosaic augmentation (4 images combined)
+  mixup: 0.0 # Mixup alpha (0 = disabled)
+  cutout: 0.0 # Cutout probability (0 = disabled)
+
+# ============================================================================
+# REGULARIZATION
+# ============================================================================
+regularization:
+  dropout: 0.3
+  label_smoothing: 0.0
+  gradient_clip: 1.0
+  weight_decay: 0.0001
+
+# ============================================================================
+# LOSS CONFIGURATION
+# ============================================================================
+loss:
+  type: auto # Options: auto, focal, weighted, standard
+  # Focal loss params (for class imbalance)
+  focal_alpha: 0.25
+  focal_gamma: 2.0
+  # Weighted loss (auto-computed from dataset if type=weighted)
+  class_weights: auto
+
+# ============================================================================
+# TRAINING STRATEGY
+# ============================================================================
+strategy:
+  warmup_epochs: 5
+  scheduler: cosine # Options: cosine, step, multistep, plateau
+  early_stopping: true
+  patience: 20
+  mixed_precision: true # Use AMP for faster training
+
+# ============================================================================
+# VALIDATION
+# ============================================================================
+validation:
+  interval: 1 # Validate every N epochs
+  metric: mAP # Primary metric: mAP, loss, f1
+  iou_threshold: 0.5 # IoU threshold for mAP calculation
+  conf_threshold: 0.25 # Confidence threshold for predictions
+
+# ============================================================================
+# CHECKPOINTING
+# ============================================================================
+checkpoint:
+  save_interval: 5 # Save checkpoint every N epochs
+  save_best_only: false # Save only best model (by validation metric)
+  save_last: true # Always save last checkpoint
+  resume: null # Path to checkpoint to resume from
+
+# ============================================================================
+# OUTPUT & LOGGING
+# ============================================================================
+output:
+  base_dir: outputs # Base output directory
+  experiment_name: null # Auto-generated: {dataset}_{model}_{timestamp}
+  log_interval: 10 # Log every N batches
+  save_predictions: true
+  save_visualizations: true
+  tensorboard: true # Enable tensorboard logging
+
+# ============================================================================
+# VISUALIZATION
+# ============================================================================
+visualization:
+  enabled: true
+  save_interval: 10 # Save visualizations every N epochs
+  num_samples: 8 # Number of samples to visualize
+  show_ground_truth: true
+  show_predictions: true
+  confidence_threshold: 0.5
+
+# ============================================================================
+# DEVICE & COMPUTE
+# ============================================================================
+device:
+  type: cuda # Options: cuda, cpu, mps
+  gpu_ids: [0] # GPU IDs to use (for multi-GPU)
+  workers: 4 # Dataloader workers
+  pin_memory: true
+
+# ============================================================================
+# DEBUGGING & DEVELOPMENT
+# ============================================================================
+debug:
+  enabled: false
+  profile: false # Profile training performance
+  fast_dev_run: false # Run 1 batch for debugging
+  seed: 42 # Random seed for reproducibility
+
+# ============================================================================
+# TRAINING PRESETS (Override settings above based on use case)
+# ============================================================================
+presets:
+  quick_test:
+    # Fast experimentation - minimal epochs, smaller size
+    train:
+      epochs: 20
+      batch_size: 16
+      learning_rate: 0.001
+    preprocess:
+      target_size: [416, 416]
+    augmentation:
+      rotation: 5
+      brightness: 0.1
+      contrast: 0.1
+    strategy:
+      early_stopping: false
+      warmup_epochs: 2
+    checkpoint:
+      save_interval: 10
+      save_best_only: true
+    output:
+      save_predictions: false
+      save_visualizations: false
+    validation:
+      interval: 2
+
+  standard:
+    # Balanced training - good results with reasonable time
+    train:
+      epochs: 100
+      batch_size: 8
+      learning_rate: 0.001
+    preprocess:
+      target_size: [640, 640]
+    augmentation:
+      rotation: 10
+      brightness: 0.2
+      contrast: 0.2
+      mosaic: true
+    strategy:
+      early_stopping: true
+      patience: 20
+      warmup_epochs: 5
+    checkpoint:
+      save_interval: 5
+      save_best_only: false
+    validation:
+      interval: 1
+
+  high_performance:
+    # Maximum accuracy - long training, aggressive augmentation
+    train:
+      epochs: 300
+      batch_size: 16
+      learning_rate: 0.002
+    preprocess:
+      target_size: [640, 640] # Can increase to 1280 for small objects
+    augmentation:
+      enabled: true
+      horizontal_flip: 0.5
+      vertical_flip: 0.2
+      rotation: 15
+      brightness: 0.3
+      contrast: 0.3
+      saturation: 0.3
+      hue: 0.15
+      mosaic: true
+      mixup: 0.2
+    regularization:
+      label_smoothing: 0.1
+    strategy:
+      early_stopping: true
+      patience: 50
+      warmup_epochs: 10
+    checkpoint:
+      save_interval: 10
+    validation:
+      interval: 1
+
+  custom:
+    # Use the base configuration defined above
+    # No overrides - fully customizable via config.yaml
+# ============================================================================
+# DATASET-SPECIFIC NOTES (Reference only - read from analysis results)
+# ============================================================================
+# These are automatically loaded from dataset_analysis_results/ at runtime
+#
+# cattle (raw/processed):
+#   - 2 classes (class imbalance ratio: 10.40)
+#   - Use weighted/focal loss for class imbalance
+#   - Small objects detected - consider higher resolution (1280x1280)
+#
+# cattlebody (raw/processed):
+#   - 1 class (single object per image typically)
+#   - Image/label mismatch issue in train split (needs fixing via preprocessing)
+#   - Large aspect ratio variation (0.75 to 2.19) - letterboxing recommended
+#   - Standard 640x640 should work well
+#
+# cattleface (processed):
+#   - ❌ Missing labels! Cannot be used for training
+#   - Already resized to 224x224 (but no annotations)

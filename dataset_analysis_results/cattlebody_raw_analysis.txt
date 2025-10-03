@@ -1,0 +1,52 @@
+================================================================================
+DATASET ANALYSIS REPORT: cattlebody_raw
+================================================================================
+Timestamp: 2025-10-03 12:06:14
+Path: /data2/enoch/ekd_coding_env/meek/project1/dataset/cattlebody
+
+STRUCTURE:
+  Format: yolo
+  Splits:
+    train: 3424 images, 3432 labels
+    val: 714 images, 714 labels
+    test: 714 images, 714 labels
+
+IMAGES:
+  Total: 4852
+  Dimensions:
+    Unique sizes: 157
+  Brightness: mean=137.2, std=20.9
+  Contrast: mean=60.7, std=9.6
+  Sharpness: mean=1552.8, std=1555.2
+
+LABELS:
+  Total objects: 4903
+  Classes: 1
+  Objects per image: mean=1.0, median=1.0
+  Bbox size (normalized):
+    Width: mean=0.314
+    Height: mean=0.319
+    Area: mean=0.105
+
+QUALITY:
+  Issues:
+    ❌ train: Image/label mismatch (3424 images, 3432 labels)
+  Warnings:
+    ⚠️  Large aspect ratio variation (0.75 to 2.19). Consider padding or letterboxing.
+
+RECOMMENDATIONS:
+  PREPROCESSING:
+    • Resize all images to consistent size (e.g., 640x640)
+  AUGMENTATION:
+    • Add brightness augmentation (±20%)
+    • Add contrast augmentation (±20%)
+    • Horizontal flip (p=0.5)
+    • Random rotation (±10°)
+    • Random scale (0.8-1.2)
+    • Mosaic augmentation for multi-object scenes
+  TRAINING:
+    • Use num_classes=1
+  ARCHITECTURE:
+    • Default anchor sizes should work well
+
+================================================================================

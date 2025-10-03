@@ -1,359 +1,181 @@
-# 🐄 Cattle Detection System````markdown
-
+````markdown
 # Cattle Detection & Recognition System
-
-> **Production-ready object detection pipeline for cattle datasets with dynamic configuration and robust preprocessing**
 
 A comprehensive machine learning pipeline for cattle detection and recognition using various deep learning architectures including Faster R-CNN, YOLOv8, and Ultralytics YOLO.
 
-## 🚀 Quick Start
-
 ## 🏗️ Project Structure
 
-```bash
-
-# 1. Analyze your dataset```
-
-python scripts/analyze_datasets_deep.pyproject1/
-
+```
+project1/
 ├── main.py                 # 🚀 Main entry point - START HERE
-
-# 2. Preprocess the data├── requirements.txt        # 📦 Python dependencies
-
-python scripts/workflow_manager.py --dataset cattlebody --stage preprocess├── README.md              # 📖 This file
-
+├── requirements.txt        # 📦 Python dependencies
+├── README.md              # 📖 This file
 ├──
-
-# 3. Train the model├── config/                # ⚙️ Configuration files
-
-python scripts/workflow_manager.py --dataset cattlebody --stage train│   ├── cattle.yaml        # YAML configuration
-
+├── config/                # ⚙️ Configuration files
+│   ├── cattle.yaml        # YAML configuration
 │   ├── hyperparameters.py # Training hyperparameters
-
-# Or run the complete pipeline│   └── paths.py           # Legacy path configuration
-
-python scripts/workflow_manager.py --dataset cattlebody --stage all├──
-
-```├── data/                  # 📁 Raw data (if any)
-
-├── dataset/               # 📊 Dataset files
-
-## 📁 Project Structure│   ├── cattleface/        # Cattle face dataset
-
-│   │   ├── CowfaceImage/  # Original images
-
-```│   │   └── Annotation/    # Annotation files
-
-project1/│   └── cattlebody/        # Cattle body dataset
-
-├── config.yaml                    # Main training configuration (dynamic!)├── processed_data/        # 🔄 Processed dataset
-
-├── dataset_profiles.yaml          # Dataset-specific settings│   ├── cattleface/        # Face detection splits
-
-├── main.py                        # Legacy main entry point│   │   ├── train/
-
-├── requirements.txt               # Python dependencies│   │   ├── val/
-
-││   │   └── test/
-
-├── scripts/                       # All executable scripts│   └── cattlebody/        # Body detection splits
-
-│   ├── workflow_manager.py        # Main workflow orchestrator│       ├── train/
-
-│   ├── preprocess_dataset.py      # Data preprocessing│       ├── val/
-
-│   ├── analyze_datasets_deep.py   # Dataset analysis│       └── test/
-
-│   └── analyze_datasets.py        # Basic analysis├──
-
-│├── src/                   # 💻 Source code
-
-├── src/                           # Source code│   ├── config/            # Configuration modules
-
-│   ├── config/                    # Configuration management│   │   ├── __init__.py
-
-│   │   └── dynamic_config_loader.py  # Runtime property detection│   │   ├── settings.py    # Main configuration
-
-│   ├── data/                      # Data loading│   │   ├── paths.py       # Path configurations
-
-│   ├── models/                    # Model implementations│   │   └── hyperparameters.py # Training hyperparameters
-
-│   ├── training/                  # Training logic│   ├── models/            # 🧠 Model architectures
-
-│   ├── evaluation/                # Evaluation metrics│   │   ├── faster_rcnn.py
-
-│   └── utils/                     # Utility functions│   │   ├── yolov8.py
-
-││   │   └── fusion_model.py
-
-├── dataset/                       # Raw datasets│   ├── training/          # 🎯 Training scripts
-
-│   ├── cattle/│   │   ├── train_faster_rcnn.py
-
-│   ├── cattlebody/│   │   ├── train_yolov8.py
-
-│   └── cattleface/│   │   ├── train_ultralytics.py
-
-││   │   └── utils.py
-
-├── processed_data/                # Preprocessed datasets│   ├── evaluation/        # 📈 Evaluation scripts
-
-├── dataset_analysis_results/      # Analysis outputs│   │   ├── evaluate_model.py
-
-├── outputs/                       # Training outputs│   │   └── metrics.py
-
-││   ├── processing/        # Data processing
-
-├── docs/                          # Documentation│   │   ├── preprocessing.py
-
-│   ├── QUICK_REFERENCE.md         # Command cheat sheet│   │   └── dataset.py
-
-│   ├── FINAL_SUMMARY.md           # System overview│   ├── utils/             # 🛠️ Utility functions
-
-│   └── CONFIG_SYSTEM_README.md    # Configuration guide│   │   ├── data_validation.py
-
-││   │   ├── logging_utils.py
-
-└── archive/                       # Old/deprecated files│   │   ├── model_validation.py
-
-```│   │   └── memory.py
-
-│   └── scripts/           # 📜 Additional scripts
-
-## ⚙️ Configuration│       ├── train_all.py
-
-│       ├── evaluate_all.py
-
-### Dynamic Configuration (No Hardcoding!)│       └── inference.py
-
+│   └── paths.py           # Legacy path configuration
 ├──
-
-The system automatically detects:└── outputs/               # 📤 All outputs organized by dataset/model
-
-- ✅ Number of classes    ├── {dataset}/         # Dataset-specific outputs
-
-- ✅ Class names    │   └── {model}/       # Model-specific outputs
-
-- ✅ Image/label counts    │       ├── models/    # Trained model weights
-
-- ✅ Dataset format (YOLO/COCO/VOC)    │       ├── logs/      # Training and execution logs
-
-- ✅ Optimal loss function    │       ├── metrics/   # Evaluation metrics (JSON + TXT)
-
+├── data/                  # 📁 Raw data (if any)
+├── dataset/               # 📊 Dataset files
+│   ├── cattleface/        # Cattle face dataset
+│   │   ├── CowfaceImage/  # Original images
+│   │   └── Annotation/    # Annotation files
+│   └── cattlebody/        # Cattle body dataset
+├── processed_data/        # 🔄 Processed dataset
+│   ├── cattleface/        # Face detection splits
+│   │   ├── train/
+│   │   ├── val/
+│   │   └── test/
+│   └── cattlebody/        # Body detection splits
+│       ├── train/
+│       ├── val/
+│       └── test/
+├──
+├── src/                   # 💻 Source code
+│   ├── config/            # Configuration modules
+│   │   ├── __init__.py
+│   │   ├── settings.py    # Main configuration
+│   │   ├── paths.py       # Path configurations
+│   │   └── hyperparameters.py # Training hyperparameters
+│   ├── models/            # 🧠 Model architectures
+│   │   ├── faster_rcnn.py
+│   │   ├── yolov8.py
+│   │   └── fusion_model.py
+│   ├── training/          # 🎯 Training scripts
+│   │   ├── train_faster_rcnn.py
+│   │   ├── train_yolov8.py
+│   │   ├── train_ultralytics.py
+│   │   └── utils.py
+│   ├── evaluation/        # 📈 Evaluation scripts
+│   │   ├── evaluate_model.py
+│   │   └── metrics.py
+│   ├── processing/        # Data processing
+│   │   ├── preprocessing.py
+│   │   └── dataset.py
+│   ├── utils/             # 🛠️ Utility functions
+│   │   ├── data_validation.py
+│   │   ├── logging_utils.py
+│   │   ├── model_validation.py
+│   │   └── memory.py
+│   └── scripts/           # 📜 Additional scripts
+│       ├── train_all.py
+│       ├── evaluate_all.py
+│       └── inference.py
+├──
+└── outputs/               # 📤 All outputs organized by dataset/model
+    ├── {dataset}/         # Dataset-specific outputs
+    │   └── {model}/       # Model-specific outputs
+    │       ├── models/    # Trained model weights
+    │       ├── logs/      # Training and execution logs
+    │       ├── metrics/   # Evaluation metrics (JSON + TXT)
     │       ├── images/    # Generated images/visualizations
-
-Simply set the dataset name in `config.yaml`:    │       ├── results/   # Training results
-
+    │       ├── results/   # Training results
     │       └── checkpoints/ # Model checkpoints
+    └── legacy/            # Legacy output structure
+        ├── models/
+        ├── logs/
+        ├── images/
+        └── results/
+```
 
-```yaml    └── legacy/            # Legacy output structure
+## 🚀 Quick Start
 
-dataset:        ├── models/
+### 1. Install Dependencies
 
-  name: cattlebody      # Change this to switch datasets        ├── logs/
+```bash
+pip install -r requirements.txt
+```
 
-  split: raw           # raw or processed        ├── images/
+### 2. Interactive Menu
 
-  # Everything else is auto-detected!        └── results/
+```bash
+python main.py
+```
 
-``````
+This launches an interactive menu for all operations.
 
+### 3. Robust Dataset Configuration (NEW!)
 
+The system now supports both traditional dataset names and direct dataset paths for maximum flexibility:
 
-### Training Presets## 🚀 Quick Start
-
-
-
-Quick preset switching for different training modes:### 1. Install Dependencies
-
-
-
-```yaml```bash
-
-active_preset: standard  # Options: quick_test, standard, high_performancepip install -r requirements.txt
-
-``````
-
-
-
-| Preset | Epochs | Resolution | Use Case |### 2. Interactive Menu
-
-|--------|--------|------------|----------|
-
-| quick_test | 20 | 416x416 | Fast iteration |```bash
-
-| standard | 100 | 640x640 | Balanced training |python main.py
-
-| high_performance | 300 | 640x640 | Maximum accuracy |```
-
-
-
-## 🔧 Key FeaturesThis launches an interactive menu for all operations.
-
-
-
-- **Dynamic Detection**: No hardcoded dataset properties### 3. Robust Dataset Configuration (NEW!)
-
-- **Analysis-Driven**: Uses dataset insights for optimal settings
-
-- **Robust Preprocessing**: Quality filtering, letterboxing, format normalizationThe system now supports both traditional dataset names and direct dataset paths for maximum flexibility:
-
-- **Auto-Configured Loss**: Handles class imbalance automatically
-
-- **Unified Workflow**: Single CLI for all operations```bash
-
-- **Comprehensive Logging**: Track everything from analysis to training# Traditional method (backward compatible)
-
+```bash
+# Traditional method (backward compatible)
 python main.py train -m faster_rcnn -d cattlebody
-
-## 📊 Dataset Status
 
 # NEW: Robust method using direct paths (works anywhere!)
+python main.py train -m faster_rcnn --dataset-path /path/to/any/dataset
 
-| Dataset | Classes | Images | Status | Resolution |python main.py train -m faster_rcnn --dataset-path /path/to/any/dataset
+# With comprehensive validation (recommended)
+python main.py train -m faster_rcnn --dataset-path dataset/cattle --validate-dataset
+```
 
-|---------|---------|--------|--------|------------|
+### 4. CUDA Error Prevention
 
-| cattlebody | 1 | 4,852 | ⚠️ Needs preprocessing | 640x640 |# With comprehensive validation (recommended)
+The system automatically prevents common CUDA device-side assert errors:
 
-| cattle | 2 (imbalanced) | 11,369 | ✅ Ready | 1280x1280 |python main.py train -m faster_rcnn --dataset-path dataset/cattle --validate-dataset
-
-| cattleface | 0 | 6,528 | ❌ No labels | N/A |```
-
-
-
-## 🎯 Common Commands### 4. CUDA Error Prevention
-
-
-
-```bashThe system automatically prevents common CUDA device-side assert errors:
-
-# Check dataset health
-
-python scripts/workflow_manager.py --dataset cattlebody --stage check```bash
-
+```bash
 # Debug your dataset before training (highly recommended)
-
-# Run deep analysispython main.py debug --dataset-path dataset/cattle --validate-dataset
-
-python scripts/workflow_manager.py --dataset cattlebody --stage analyze
+python main.py debug --dataset-path dataset/cattle --validate-dataset
 
 # The system will automatically detect and fix:
-
-# Preprocess dataset (fixes issues)# - Class count mismatches
-
-python scripts/workflow_manager.py --dataset cattlebody --stage preprocess# - Label range issues
-
+# - Class count mismatches
+# - Label range issues
 # - Invalid bounding boxes
+# - Dataset compatibility problems
+```
 
-# Train with standard preset# - Dataset compatibility problems
+## � Command Reference
 
-python scripts/workflow_manager.py --dataset cattlebody --stage train```
+The system provides several commands with both short and long aliases for convenience. **NEW**: All training commands now support robust dataset configuration!
 
+### � **NEW: Robust Dataset Configuration**
 
+The system now supports two modes for maximum flexibility and portability:
 
-# Run full pipeline## � Command Reference
+#### **Mode 1: Robust Path-Based (Recommended)**
 
-python scripts/workflow_manager.py --dataset cattlebody --stage all
-
-```The system provides several commands with both short and long aliases for convenience. **NEW**: All training commands now support robust dataset configuration!
-
-
-
-## 📚 Documentation### � **NEW: Robust Dataset Configuration**
-
-
-
-See the `docs/` folder for detailed guides:The system now supports two modes for maximum flexibility and portability:
-
-
-
-- **[QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md)** - Command cheat sheet#### **Mode 1: Robust Path-Based (Recommended)**
-
-- **[FINAL_SUMMARY.md](docs/FINAL_SUMMARY.md)** - Complete system overview
-
-- **[CONFIG_SYSTEM_README.md](docs/CONFIG_SYSTEM_README.md)** - Configuration guide```bash
-
-- **[WORKFLOW_GUIDE.md](docs/WORKFLOW_GUIDE.md)** - Step-by-step workflows# Works anywhere - just specify the dataset path directly
-
+```bash
+# Works anywhere - just specify the dataset path directly
 python main.py train -m faster_rcnn --dataset-path /absolute/path/to/dataset
-
-## 🛠️ Installationpython main.py train -m faster_rcnn --dataset-path ./relative/path/to/dataset
-
+python main.py train -m faster_rcnn --dataset-path ./relative/path/to/dataset
 python main.py train -m faster_rcnn --dataset-path dataset/cattle
 
-```bash
-
-# Install dependencies# With validation and overrides
-
-pip install -r requirements.txtpython main.py train -m faster_rcnn --dataset-path dataset/cattle --validate-dataset --num-classes 3
-
+# With validation and overrides
+python main.py train -m faster_rcnn --dataset-path dataset/cattle --validate-dataset --num-classes 3
 ```
 
-# Verify installation
-
-python scripts/workflow_manager.py --help#### **Mode 2: Traditional Name-Based (Backward Compatible)**
-
-```
+#### **Mode 2: Traditional Name-Based (Backward Compatible)**
 
 ```bash
-
-## 🔍 Troubleshooting# Uses predefined dataset names (still works)
-
+# Uses predefined dataset names (still works)
 python main.py train -m faster_rcnn -d cattlebody
+python main.py train -m faster_rcnn -d cattleface
+python main.py train -m faster_rcnn -d cattle
+```
 
-| Issue | Solution |python main.py train -m faster_rcnn -d cattleface
-
-|-------|----------|python main.py train -m faster_rcnn -d cattle
-
-| Image/label mismatch | Run preprocessing: `python scripts/workflow_manager.py --dataset cattlebody --stage preprocess` |```
-
-| Class imbalance | Set `loss.type: auto` in config.yaml (default) |
-
-| Small objects | Increase resolution to 1280 in config.yaml |### 🛡️ **CUDA Error Prevention System**
-
-| Too slow | Use `active_preset: quick_test` |
+### 🛡️ **CUDA Error Prevention System**
 
 **Before training, always run diagnostics to prevent CUDA device-side assert errors:**
 
-## 🤝 Contributing
-
 ```bash
+# Comprehensive dataset diagnostic (HIGHLY RECOMMENDED)
+python main.py debug --dataset-path dataset/cattle --validate-dataset --sample-size 10
 
-When adding features:# Comprehensive dataset diagnostic (HIGHLY RECOMMENDED)
+# Quick diagnostic check
+python main.py debug --dataset-path dataset/cattle
 
-- Keep config.yaml for hyperparameters onlypython main.py debug --dataset-path dataset/cattle --validate-dataset --sample-size 10
-
-- Use dynamic_config_loader.py for dataset facts
-
-- Add quality checks to preprocessing# Quick diagnostic check
-
-- Document everythingpython main.py debug --dataset-path dataset/cattle
-
-
-
-## 📝 License# Debug with traditional dataset names
-
+# Debug with traditional dataset names
 python main.py debug -d cattle --validate-dataset
+```
 
-[Your License]```
+**The diagnostic system checks for:**
 
-
-
-## 🙏 Acknowledgments**The diagnostic system checks for:**
-
-
-
-Built with modern ML engineering practices for production-ready cattle detection.- ✅ CUDA compatibility and GPU status
-
+- ✅ CUDA compatibility and GPU status
 - ✅ Dataset structure and file integrity
-
----- ✅ Label range validation (prevents assert errors)
-
+- ✅ Label range validation (prevents assert errors)
 - ✅ Class count analysis and recommendations
-
-**Ready for world-class cattle detection! 🐄🚀**- ✅ Bounding box format validation
-
+- ✅ Bounding box format validation
 - ✅ Model compatibility testing
 
 ### �📋 All Available Commands

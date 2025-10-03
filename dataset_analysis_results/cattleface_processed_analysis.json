@@ -1,0 +1,120 @@
+{
+  "name": "cattleface_processed",
+  "path": "/data2/enoch/ekd_coding_env/meek/project1/processed_data/cattleface",
+  "timestamp": "2025-10-03 12:09:15",
+  "structure": {
+    "splits": {
+      "train": {
+        "images": 4565,
+        "labels": 0,
+        "image_dir": "/data2/enoch/ekd_coding_env/meek/project1/processed_data/cattleface/train/images",
+        "label_dir": null
+      },
+      "val": {
+        "images": 979,
+        "labels": 0,
+        "image_dir": "/data2/enoch/ekd_coding_env/meek/project1/processed_data/cattleface/val/images",
+        "label_dir": null
+      },
+      "test": {
+        "images": 984,
+        "labels": 0,
+        "image_dir": "/data2/enoch/ekd_coding_env/meek/project1/processed_data/cattleface/test/images",
+        "label_dir": null
+      }
+    },
+    "format": "unknown",
+    "has_data_yaml": false
+  },
+  "images": {
+    "total": 6528,
+    "analyzed": 1000,
+    "dimensions": {
+      "unique_count": 1,
+      "most_common": [
+        [
+          [
+            224,
+            224
+          ],
+          1000
+        ]
+      ],
+      "min": [
+        224,
+        224
+      ],
+      "max": [
+        224,
+        224
+      ]
+    },
+    "aspect_ratios": {
+      "mean": 1.0,
+      "std": 0.0,
+      "min": 1.0,
+      "max": 1.0
+    },
+    "brightness": {
+      "mean": 88.66298820153062,
+      "std": 5.660734692508453,
+      "min": 70.5621412627551,
+      "max": 99.05147879464286
+    },
+    "contrast": {
+      "mean": 62.105210486761756,
+      "std": 4.910839990995471,
+      "min": 53.439009270373774,
+      "max": 75.57035776042636
+    },
+    "sharpness": {
+      "mean": 2135.2383122096044,
+      "std": 248.12834044535796,
+      "min": 1561.7667643278157,
+      "max": 2808.412382086929
+    },
+    "file_sizes": {
+      "mean_kb": 13.0514990234375,
+      "median_kb": 13.09423828125,
+      "min_kb": 11.0830078125,
+      "max_kb": 14.21484375
+    },
+    "formats": {
+      ".jpg": 1000
+    },
+    "channels": {
+      "unique": [
+        3
+      ],
+      "most_common": [
+        3,
+        1000
+      ]
+    }
+  },
+  "labels": {
+    "error": "No labels found"
+  },
+  "quality": {
+    "issues": [
+      "train: Image/label mismatch (4565 images, 0 labels)",
+      "val: Image/label mismatch (979 images, 0 labels)",
+      "test: Image/label mismatch (984 images, 0 labels)"
+    ],
+    "warnings": [],
+    "passed": false
+  },
+  "recommendations": {
+    "preprocessing": [],
+    "augmentation": [
+      "Add brightness augmentation (\u00b120%)",
+      "Add contrast augmentation (\u00b120%)",
+      "Horizontal flip (p=0.5)",
+      "Random rotation (\u00b110\u00b0)",
+      "Random scale (0.8-1.2)",
+      "Mosaic augmentation for multi-object scenes"
+    ],
+    "training": [],
+    "architecture": []
+  }
+}
