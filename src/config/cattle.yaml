@@ -1,7 +1,0 @@
-path: ../cattle-dataset/cattlebody  # dataset root dir
-train: train/images  # train images
-val: val/images  # val images
-
-# Classes
-names:
-  0: cattle

@@ -261,21 +261,139 @@ presets:
     # Use the base configuration defined above
     # No overrides - fully customizable via config.yaml
 # ============================================================================
-# DATASET-SPECIFIC NOTES (Reference only - read from analysis results)
+# DATASET-SPECIFIC PROFILES
 # ============================================================================
+# Auto-filled from deep analysis, enhanced with preprocessing strategies
 # These are automatically loaded from dataset_analysis_results/ at runtime
-#
-# cattle (raw/processed):
-#   - 2 classes (class imbalance ratio: 10.40)
-#   - Use weighted/focal loss for class imbalance
-#   - Small objects detected - consider higher resolution (1280x1280)
-#
-# cattlebody (raw/processed):
-#   - 1 class (single object per image typically)
-#   - Image/label mismatch issue in train split (needs fixing via preprocessing)
-#   - Large aspect ratio variation (0.75 to 2.19) - letterboxing recommended
-#   - Standard 640x640 should work well
-#
-# cattleface (processed):
-#   - ❌ Missing labels! Cannot be used for training
-#   - Already resized to 224x224 (but no annotations)
+
+dataset_profiles:
+  # --------------------------------------------------------------------------
+  # CATTLEBODY - Single object body detection
+  # --------------------------------------------------------------------------
+  cattlebody:
+    modality: rgb_camera
+    task: single_object_detection
+
+    analysis:
+      num_classes: 1
+      class_names: ["Cattlebody"]
+      format: yolo
+      has_data_yaml: true
+
+      # Statistics from analysis
+      image_stats:
+        mean: [0.5380, 0.5380, 0.5380]
+        std: [0.0820, 0.0820, 0.0820]
+        brightness_mean: 137.20
+        contrast_mean: 60.69
+        aspect_ratio_range: [0.75, 2.19]
+
+      object_stats:
+        objects_per_image: 1.009
+        avg_bbox_area: 0.105
+        bbox_aspect_ratio: 0.985
+
+      quality_issues:
+        - "train: Image/label mismatch (3424 images, 3432 labels)"
+        - "Large aspect ratio variation (0.75 to 2.19)"
+
+      recommendations:
+        - "Resize to 640x640 with letterboxing"
+        - "Use standard loss (no class imbalance)"
+        - "Fix train split mismatch via preprocessing"
+
+    # Optimized settings for this dataset
+    override:
+      preprocess:
+        target_size: [640, 640]
+        maintain_aspect: true
+        fix_mismatches: true
+      train:
+        batch_size: 16
+        learning_rate: 0.001
+      loss:
+        type: standard
+
+  # --------------------------------------------------------------------------
+  # CATTLE - Multi-object detection with class imbalance
+  # --------------------------------------------------------------------------
+  cattle:
+    modality: rgb_camera
+    task: multi_object_detection
+
+    analysis:
+      num_classes: 2
+      class_names: ["class_0", "class_1"]
+      format: unknown
+      has_data_yaml: false
+
+      # Statistics
+      image_stats:
+        mean: [0.4272, 0.4272, 0.4272]
+        std: [0.1097, 0.1097, 0.1097]
+        brightness_mean: 108.96
+        contrast_mean: 65.25
+        aspect_ratio_range: [0.75, 1.91]
+
+      object_stats:
+        objects_per_image: 4.907
+        avg_bbox_area: 0.029
+        bbox_aspect_ratio: 0.570
+        class_imbalance_ratio: 10.40 # SEVERE imbalance!
+
+      quality_issues:
+        - "Class imbalance detected (ratio: 10.40)"
+        - "Small objects (avg area: 0.029)"
+
+      recommendations:
+        - "Use higher resolution (1280x1280) for small objects"
+        - "Use focal loss for class imbalance"
+        - "Aggressive augmentation (mosaic, mixup)"
+
+    # Optimized settings for this dataset
+    override:
+      preprocess:
+        target_size: [1280, 1280] # Higher for small objects
+        min_bbox_size: 0.0005
+        normalization:
+          method: "dataset_specific"
+          mean: [0.4272, 0.4272, 0.4272]
+          std: [0.1097, 0.1097, 0.1097]
+      augmentation:
+        vertical_flip: 0.1
+        rotation: 15
+        scale: [0.7, 1.3]
+        mixup: 0.15
+      train:
+        epochs: 150
+        batch_size: 8 # Smaller due to 1280 resolution
+        learning_rate: 0.0005
+      loss:
+        type: focal
+        focal_alpha: 0.25
+        focal_gamma: 2.0
+      strategy:
+        warmup_epochs: 10
+        patience: 30
+
+  # --------------------------------------------------------------------------
+  # CATTLEFACE - BROKEN (no labels)
+  # --------------------------------------------------------------------------
+  cattleface:
+    modality: rgb_camera
+    task: face_detection
+    status: broken # Cannot use for training
+
+    analysis:
+      num_classes: 0
+      class_names: []
+      quality_issues:
+        - "NO LABELS FOUND - Cannot train!"
+        - "All splits missing annotations"
+
+      recommendations:
+        - "Find original annotation files or re-annotate"
+
+    # Cannot configure training without labels
+    override:
+      enabled: false

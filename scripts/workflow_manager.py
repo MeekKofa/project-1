@@ -14,7 +14,12 @@ Usage:
     python workflow_manager.py --dataset cattle --stage train
     
     # With custom config
-    python workflow_manager.py --dataset cattlebody --stage preprocess --profile dataset_profiles.yaml
+    pyt    parser.add_argument(
+        '--config',
+        type=str,
+        default='config.yaml',
+        help='Path to configuration YAML (contains dataset profiles)'
+    )rkflow_manager.py --dataset cattlebody --stage preprocess --config config.yaml
 """
 
 import argparse
@@ -41,22 +46,19 @@ class WorkflowManager:
     def __init__(
         self,
         dataset_name: str,
-        config_path: str = "config.yaml",
-        profile_path: str = "dataset_profiles.yaml"
+        config_path: str = "config.yaml"
     ):
         """Initialize workflow manager."""
         self.dataset_name = dataset_name
         self.project_root = Path.cwd()
 
-        # Load configurations
+        # Load unified configuration
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
 
-        with open(profile_path, 'r') as f:
-            self.profiles = yaml.safe_load(f)
-
-        # Get dataset profile
-        self.profile = self.profiles.get('datasets', {}).get(dataset_name)
+        # Get dataset profile from unified config
+        self.profile = self.config.get(
+            'dataset_profiles', {}).get(dataset_name)
         if not self.profile:
             logger.warning(
                 f"No profile found for {dataset_name}, using defaults")
@@ -543,8 +545,7 @@ Stages:
     # Create workflow manager
     manager = WorkflowManager(
         dataset_name=args.dataset,
-        config_path=args.config,
-        profile_path=args.profile
+        config_path=args.config
     )
 
     # Print summary if requested

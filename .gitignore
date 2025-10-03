@@ -260,3 +260,19 @@ lightning_logs/
 # Ultralytics YOLO
 yolo_*.txt
 yolo_*.yaml
+
+# ============================================================================
+# Project-Specific Ignores
+# ============================================================================
+
+# Analysis results (auto-generated, large files)
+dataset_analysis_results/
+
+# Documentation (development notes, planning docs)
+docs/
+
+# Archive (old/deprecated files)
+archive/
+
+# Cleanup scripts
+cleanup.sh
