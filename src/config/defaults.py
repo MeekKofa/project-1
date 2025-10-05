@@ -111,6 +111,19 @@ DEFAULTS = {
         'max_visualizations': 100,
     },
 
+    # Visualization settings
+    'visualization': {
+        'enabled': True,
+        'save_interval': 10,  # Save visualizations every N epochs when enabled
+        'num_samples': 8,     # Number of samples to visualize
+        'show_ground_truth': True,
+        'show_predictions': True,
+        'confidence_threshold': 0.5,
+        'always_save_first': True,
+        'always_save_last': True,
+        'max_epochs_to_keep': 5,
+    },
+
     # Output settings
     'output': {
         'base_dir': 'outputs',

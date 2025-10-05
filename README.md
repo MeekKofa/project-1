@@ -1,3 +1,204 @@
+# 🐄 Cattle Detection System
+
+End-to-end PyTorch pipeline for cattle detection across multiple datasets and model architectures. The project ships with reproducible training and evaluation utilities, dataset sanity checks, and visualization tooling so you can iterate quickly and keep artifacts organized.
+
+---
+
+## Key Features
+- **Model zoo**: Faster R-CNN and YOLOv8 (ResNet/CSP backbones) behind a single CLI.
+- **Config-first workflow**: YAML + CLI merge with sensible defaults and dataset auto-detection.
+- **Unified artifacts**: Metrics, predictions, plots, and visualizations written to a predictable directory layout.
+- **Standalone evaluation**: Re-run metrics and export predictions from any checkpoint with one command.
+- **Diagnostics**: System/config verifiers and dataset scanners catch issues before long training runs.
+
+---
+
+## Requirements
+- Python 3.8+
+- CUDA-capable GPU recommended (CPU and Apple MPS supported via flags)
+- `pip install -r requirements.txt`
+
+```bash
+# From the project root
+pip install -r requirements.txt
+```
+
+> **Tip:** Use a virtual environment (venv, Conda, Poetry, etc.) to isolate dependencies.
+
+---
+
+## Dataset Layout
+The repository expects raw data under `dataset/<name>/` and (optionally) processed data under `processed_data/<name>/`. Each dataset should provide `train/`, `val/`, and `test/` splits in YOLO format.
+
+```
+dataset/
+    cattle/
+        train/ images + labels
+        val/
+        test/
+    cattlebody/
+    cattleface/
+processed_data/
+    cattle/
+    cattlebody/
+    cattleface/
+```
+
+Use `python test_dataset_detection.py` if you are unsure whether the expected metadata is present—this script prints what the loaders see without importing heavy torch dependencies.
+
+---
+
+## Quick Start Workflow
+
+### 1. Train a model
+```bash
+python train.py train -m yolov8_resnet -d cattle -e 20 -b 4
+```
+- `-m / --model`: one of `faster_rcnn`, `yolov8_resnet`, `yolov8_csp`
+- `-d / --dataset`: `cattle`, `cattlebody`, `cattleface`
+- `-e / --epochs`, `-b / --batch-size`: override defaults from the config
+- Add `--mixed-precision` for FP16 on CUDA, `--device cpu` to force CPU, or `--resume <checkpoint>` to continue a run
+
+### 2. Evaluate / test a checkpoint
+```bash
+python train.py eval \
+    -m yolov8_resnet \
+    -d cattle \
+    -p outputs/cattle/yolov8_resnet/checkpoints/best.pth \
+    --split test
+```
+- Works with `best.pth`, `latest.pth`, or any `epoch_XXX.pth`
+- `--split` supports `train`, `val`, or `test`
+- Optional flags: `--batch-size`, `--run-name`, `--save-predictions` / `--no-save-predictions`, `--device`
+
+All evaluation artifacts land in `outputs/<dataset>/<model>/evaluations/<run_name>/`, keeping them separate from training-time metrics.
+
+### 3. Inspect metrics & visualizations
+- Metrics CSV/JSON: `outputs/<dataset>/<model>/metrics/`
+- Evaluation exports: `outputs/<dataset>/<model>/evaluations/<run>/metrics/`
+- Detection overlays: `outputs/<dataset>/<model>/visualizations/<split>/`
+- Plots: `outputs/<dataset>/<model>/metrics/plots/`
+
+Our `BaseTrainer` maintains a clean history (`metrics_summary.csv`, `{split}_metrics.csv/json`) while pruning old per-epoch files.
+
+---
+
+## Command Reference
+
+### `train.py`
+- `python train.py train ...` – launch training with merged config/CLI settings.
+- `python train.py eval ...` – run standalone evaluation on any checkpoint (see above).
+- `python train.py preprocess ...` – placeholder for future preprocessing integration (current preprocessing is handled automatically by loaders).
+
+### Diagnostics & utilities
+- `python verify_system.py` – environment sanity checks (CUDA availability, package versions, etc.).
+- `python verify_training_config.py` – validate merged config to catch missing keys or conflicting overrides.
+- `python test_dataset_detection.py` – lightweight dataset metadata inspection.
+- `python check_system.py` – quick hardware summary.
+- `python scripts/analyze_datasets_deep.py --dataset cattle` – optional dataset statistics and figures.
+- `python scripts/workflow_manager.py --dataset cattle --stage all` – orchestrated end-to-end pipeline (analyze → preprocess → train → evaluate).
+
+### Visualization helpers
+Visualization images are generated automatically during validation/testing (configurable via `visualization` settings). To inspect the latest assets quickly:
+```bash
+ls outputs/cattle/yolov8_resnet/visualizations/val
+```
+Adjust `visualization.max_epochs_to_keep` in the config if you want to retain more or fewer epochs.
+
+---
+
+## Workflow helper script
+To streamline recurring commands, use the Bash wrapper we provide.
+
+```bash
+chmod +x scripts/workflow_commands.sh
+./scripts/workflow_commands.sh --help
+```
+
+Available subcommands include:
+
+| Command | Description |
+| --- | --- |
+| `train [args...]` | Proxy to `python train.py train ...` |
+| `eval [args...]` | Proxy to `python train.py eval ...` |
+| `preprocess [args...]` | Runs `scripts/workflow_manager.py --stage preprocess ...` |
+| `workflow [args...]` | Direct pass-through to `scripts/workflow_manager.py` |
+| `verify-system` | Runs `verify_system.py` |
+| `verify-config` | Runs `verify_training_config.py` |
+| `dataset-detect` | Runs `test_dataset_detection.py` |
+| `check-system` | Runs `check_system.py` |
+| `analyze-dataset [args...]` | Runs the deep dataset analysis script |
+| `list-metrics --dataset D --model M` | Lists available metric files |
+| `list-visuals --dataset D --model M` | Lists generated visualization images |
+
+Example: re-run the test split on the best checkpoint via the wrapper:
+```bash
+./scripts/workflow_commands.sh eval \
+    -m yolov8_resnet \
+    -d cattle \
+    -p outputs/cattle/yolov8_resnet/checkpoints/best.pth \
+    --split test
+```
+
+---
+
+## Outputs & Artifacts
+```
+outputs/<dataset>/<model>/
+├── checkpoints/          # best.pth, latest.pth, epoch_XXX.pth
+├── logs/                 # train.log, evaluation logs
+├── metrics/              # train_metrics.csv, {split}_metrics.csv/json, metrics_summary.csv, plots/
+├── predictions/          # {split}_predictions.json (latest evaluation)
+├── visualizations/       # {split}/ detection overlays
+└── evaluations/<run>/    # Standalone eval artifacts (metrics, predictions, logs, config)
+```
+
+During evaluation we disable checkpoint saves, so the new artifacts remain isolated under `evaluations/<run_name>/` while still writing split-aware metrics and predictions.
+
+---
+
+## Troubleshooting Checklist
+- `python verify_system.py` – confirm environment before long trainings.
+- `python verify_training_config.py` – review merged config values.
+- `python test_dataset_detection.py` – ensure class counts and label files are detected correctly.
+- `./scripts/workflow_commands.sh list-metrics --dataset cattle --model yolov8_resnet` – verify metrics exported as expected.
+- Inspect `outputs/<dataset>/<model>/logs/train.log` for per-epoch summaries.
+
+If you encounter issues with the visualization quota, adjust `visualization.max_epochs_to_keep` or disable the feature via `visualization.enabled` in `config.yaml`.
+
+---
+
+## Project Structure (abridged)
+```
+project1/
+├── train.py                      # Entry point for training/evaluation
+├── verify_system.py              # Environment diagnostics
+├── verify_training_config.py     # Config validator
+├── test_dataset_detection.py     # Dataset metadata probe
+├── src/
+│   ├── cli/args.py               # CLI definitions
+│   ├── config/                   # Defaults, manager, config.yaml
+│   ├── evaluation/               # Standalone evaluation orchestrator
+│   ├── loaders/                  # Dataset registry + transforms
+│   ├── models/                   # Detection model registry & definitions
+│   ├── training/                 # Trainers, loops, checkpoints
+│   └── utils/                    # Metric plotting, helpers
+├── scripts/
+│   ├── workflow_commands.sh      # Command wrapper (this doc)
+│   ├── workflow_manager.py       # Multi-stage workflow
+│   └── analyze_datasets_deep.py  # Dataset analysis utilities
+├── outputs/                      # Training & evaluation artifacts
+└── docs/                         # Additional documentation (evaluation, architecture, etc.)
+```
+
+---
+
+Need something that is not documented here? Check `docs/` for deeper dives (`docs/evaluation.md` covers evaluation artifacts in detail) or open an issue describing the workflow you would like to automate.
+
+---
+
+## Legacy README (original quickstart)
+
 # 🐄 Cattle Detection System# 🐄 Cattle Detection System````markdown
 
 Professional ML engineering system for cattle detection using PyTorch.# Cattle Detection & Recognition System

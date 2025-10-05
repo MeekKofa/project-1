@@ -80,19 +80,56 @@ def handle_eval(config: dict):
     Args:
         config: Merged configuration dictionary
     """
+    from src.evaluation.orchestrator import evaluate_model
+
+    cli_args = config.get('_metadata', {}).get('cli_args', {})
+    checkpoint_path = cli_args.get('checkpoint') or config.get('resume_checkpoint')
+    if not checkpoint_path:
+        raise ValueError("Evaluation requires a checkpoint path. Use --checkpoint to specify one.")
+
+    split = cli_args.get('split') or config.get('validation', {}).get('split', 'test')
+    batch_size = cli_args.get('batch_size') or config.get('evaluation', {}).get('batch_size')
+    run_name = cli_args.get('run_name')
+
     print("\n" + "="*70)
     print("EVALUATION MODE")
     print("="*70)
-    print("Note: Evaluation pipeline is not yet integrated into train.py")
-    print("Evaluation happens automatically during training.")
-    print("Check outputs/{dataset}/{model}/metrics/ for results.")
+    print(f"Checkpoint: {checkpoint_path}")
+    print(f"Split: {split}")
+    if run_name:
+        print(f"Run name: {run_name}")
     print("="*70 + "\n")
 
-    print("To manually evaluate a checkpoint:")
-    print("  1. Load the model from checkpoints/best.pth")
-    print("  2. Run inference on validation set")
-    print("  3. Calculate metrics (mAP, precision, recall)")
-    print("\nSee archived evaluation code in archive/old_evaluation/")
+    try:
+        results = evaluate_model(
+            config=config,
+            checkpoint_path=checkpoint_path,
+            split=split,
+            batch_size=batch_size,
+            run_name=run_name,
+        )
+
+        metrics = results.get('metrics', {})
+        output_dir = results.get('output_dir')
+        summary_path = results.get('summary_path')
+
+        print("\n" + "="*70)
+        print("✓ EVALUATION COMPLETED SUCCESSFULLY!")
+        print("="*70)
+        print(f"Primary metric (mAP@0.5): {metrics.get('map_50', 0.0):.4f}")
+        print(f"Precision@0.5: {metrics.get('precision_50', 0.0):.4f}")
+        print(f"Recall@0.5: {metrics.get('recall_50', 0.0):.4f}")
+        print(f"Evaluation artifacts: {output_dir}")
+        print(f"Summary: {summary_path}")
+        print("="*70 + "\n")
+
+    except Exception as e:
+        print("\n" + "="*70)
+        print("✗ EVALUATION FAILED!")
+        print("="*70)
+        print(f"Error: {e}")
+        print("="*70 + "\n")
+        raise
 
 
 def handle_preprocess(config: dict):

@@ -151,6 +151,7 @@ class DetectionTrainer(BaseTrainer):
         conf_threshold = validation_cfg.get('conf_threshold', 0.25)
         metric_iou = validation_cfg.get('iou_threshold', 0.5)
         max_det = validation_cfg.get('max_det', 300)
+        split_name = validation_cfg.get('split', validation_cfg.get('split_name', 'val'))
 
         model_cfg = self.config.get('models', {})
         model_name = self.config.get('model')
@@ -292,7 +293,8 @@ class DetectionTrainer(BaseTrainer):
 
         # Persist evaluation artifacts
         metrics_summary['epoch'] = self.current_epoch + 1
-        self._save_consolidated_metrics(metrics_summary)
+        metrics_summary['split'] = split_name
+        self._save_consolidated_metrics(metrics_summary, split=split_name)
 
         if self.output_config.get('save_predictions', True):
             self._save_consolidated_predictions(
@@ -302,15 +304,17 @@ class DetectionTrainer(BaseTrainer):
                     'conf_threshold': conf_threshold,
                     'nms_iou': nms_iou,
                     'max_detections': max_det,
+                    'split': split_name,
                 },
+                split=split_name,
             )
 
         if vis_enabled:
-            self._save_visualizations(visual_samples, split='evaluation')
+            self._save_visualizations(visual_samples, split=split_name)
 
         return val_metrics
 
-    def _save_consolidated_metrics(self, metrics_summary: Dict[str, Any]) -> None:
+    def _save_consolidated_metrics(self, metrics_summary: Dict[str, Any], split: str) -> None:
         """Persist validation metrics into a single JSON file with history."""
         if self.class_names:
             for entry in metrics_summary.get('per_class', []):
@@ -318,7 +322,7 @@ class DetectionTrainer(BaseTrainer):
                 if class_idx is not None and class_idx < len(self.class_names):
                     entry['class_name'] = self.class_names[class_idx]
 
-        metrics_path = self.metrics_dir / 'val_metrics.json'
+        metrics_path = self.metrics_dir / f'{split}_metrics.json'
         history: List[Dict[str, Any]]
 
         if metrics_path.exists():
@@ -349,9 +353,10 @@ class DetectionTrainer(BaseTrainer):
         accumulator: DetectionMetricAccumulator,
         epoch: int,
         metadata: Dict[str, Any],
+        split: str,
     ) -> None:
         """Write predictions/targets from the most recent validation step to a single file."""
-        predictions_path = self.output_dir / 'predictions' / 'val_predictions.json'
+        predictions_path = self.output_dir / 'predictions' / f'{split}_predictions.json'
         predictions_path.parent.mkdir(parents=True, exist_ok=True)
 
         payload = {

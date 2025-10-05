@@ -231,8 +231,25 @@ def create_parser() -> argparse.ArgumentParser:
 
     eval_parser.add_argument(
         '--save-predictions',
+        dest='save_predictions',
         action='store_true',
-        help='Save prediction visualizations'
+        help='Enable saving consolidated predictions'
+    )
+
+    eval_parser.add_argument(
+        '--no-save-predictions',
+        dest='save_predictions',
+        action='store_false',
+        help='Disable saving consolidated predictions'
+    )
+
+    eval_parser.set_defaults(save_predictions=None)
+
+    eval_parser.add_argument(
+        '--run-name',
+        type=str,
+        default=None,
+        help='Optional custom name for the evaluation run'
     )
 
     # ============================================

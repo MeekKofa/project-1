@@ -12,6 +12,8 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 from PIL import Image, ImageDraw
+import re
+from collections import defaultdict
 
 from src.training.checkpoints import CheckpointManager
 
@@ -47,7 +49,15 @@ class BaseTrainer(ABC):
         self.dataset_info = config.get('dataset_info', {})
         self.class_names = self.dataset_info.get('class_names', [])
         self.num_classes = self.dataset_info.get('num_classes')
-        self.validation_config = config.get('validation', {})
+
+        validation_cfg = config.get('validation', {}) or {}
+        evaluation_cfg = config.get('evaluation', {}) or {}
+        self.validation_config = dict(validation_cfg)
+        for key, value in evaluation_cfg.items():
+            self.validation_config.setdefault(key, value)
+        self.validation_config.setdefault('split', 'val')
+        self.validation_config.setdefault('split_name', self.validation_config.get('split', 'val'))
+
         self.visualization_config = config.get('visualization', {})
         self.output_config = config.get('output', {})
 
@@ -94,6 +104,7 @@ class BaseTrainer(ABC):
         # Metrics tracking
         self.train_metrics = []
         self.val_metrics = []
+        self.epoch_history = []
 
         # Setup optimizer and scheduler
         self.optimizer = self._create_optimizer()
@@ -279,6 +290,8 @@ class BaseTrainer(ABC):
                 self.val_metrics.append(
                     {**{'epoch': epoch + 1}, **val_metrics})
 
+            self.epoch_history.append(epoch_metrics)
+
             # Check if best model
             current_metric = val_metrics.get(
                 'loss', train_metrics.get('loss', float('inf')))
@@ -321,6 +334,8 @@ class BaseTrainer(ABC):
         """Save metrics to CSV files."""
         import csv
 
+        self.metrics_dir.mkdir(parents=True, exist_ok=True)
+
         # Save training metrics
         if self.train_metrics:
             train_csv = self.metrics_dir / 'train_metrics.csv'
@@ -332,12 +347,48 @@ class BaseTrainer(ABC):
 
         # Save validation metrics
         if self.val_metrics:
-            val_csv = self.metrics_dir / 'val_metrics.csv'
+            val_split = self.validation_config.get('split_name', self.validation_config.get('split', 'val'))
+            val_csv = self.metrics_dir / f'{val_split}_metrics.csv'
             with open(val_csv, 'w', newline='') as f:
                 writer = csv.DictWriter(
                     f, fieldnames=self.val_metrics[0].keys())
                 writer.writeheader()
                 writer.writerows(self.val_metrics)
+
+        # Save combined epoch metrics (train + val + lr)
+        if self.epoch_history:
+            summary_csv = self.metrics_dir / 'metrics_summary.csv'
+            fieldnames = []
+            keys = set()
+            for row in self.epoch_history:
+                keys.update(row.keys())
+
+            if 'epoch' in keys:
+                fieldnames.append('epoch')
+                keys.remove('epoch')
+            if 'lr' in keys:
+                fieldnames.append('lr')
+                keys.remove('lr')
+
+            fieldnames.extend(sorted(keys))
+
+            with open(summary_csv, 'w', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(self.epoch_history)
+
+        self._generate_metric_plots()
+
+    def _generate_metric_plots(self) -> None:
+        """Render training/validation metric visualizations."""
+        try:
+            from src.utils.metrics_plotter import MetricsPlotter
+        except ImportError:
+            self.logger.warning("matplotlib not available; skipping metric plots")
+            return
+
+        plotter = MetricsPlotter(self.metrics_dir / 'plots')
+        plotter.update(self.train_metrics, self.val_metrics, self.epoch_history)
 
     def _cleanup_epoch_artifacts(self) -> None:
         """Remove legacy per-epoch JSON files so only consolidated outputs remain."""
@@ -408,6 +459,41 @@ class BaseTrainer(ABC):
         if not samples:
             return
 
+        epoch_idx = self.current_epoch + 1
+        total_epochs = max(self.epochs, epoch_idx)
+
+        configured_epochs = self.visualization_config.get('epochs')
+        if configured_epochs:
+            if not isinstance(configured_epochs, (list, tuple, set)):
+                configured_epochs = [configured_epochs]
+            try:
+                configured_epochs = {int(e) for e in configured_epochs}
+            except (TypeError, ValueError):
+                configured_epochs = set()
+            if configured_epochs and epoch_idx not in configured_epochs:
+                return
+        else:
+            save_interval = self.visualization_config.get('save_interval', 1) or 1
+            try:
+                save_interval = max(1, int(save_interval))
+            except (TypeError, ValueError):
+                save_interval = 1
+
+            always_save_first = self.visualization_config.get('always_save_first', True)
+            always_save_last = self.visualization_config.get('always_save_last', True)
+
+            should_save = True
+            if save_interval > 1 and (epoch_idx % save_interval != 0):
+                should_save = False
+
+            if not should_save and always_save_first and epoch_idx == 1:
+                should_save = True
+            if not should_save and always_save_last and epoch_idx == total_epochs:
+                should_save = True
+
+            if not should_save:
+                return
+
         vis_dir = self.viz_dir / split
         vis_dir.mkdir(exist_ok=True)
 
@@ -435,3 +521,38 @@ class BaseTrainer(ABC):
 
             filename = vis_dir / f"{split}_epoch_{self.current_epoch + 1}_img_{sample['image_id']}_{idx}.png"
             image.save(filename)
+
+        max_epochs_to_keep = self.visualization_config.get('max_epochs_to_keep')
+        if max_epochs_to_keep:
+            try:
+                max_epochs_to_keep = int(max_epochs_to_keep)
+            except (TypeError, ValueError):
+                max_epochs_to_keep = 0
+
+            if max_epochs_to_keep > 0:
+                self._prune_visualization_outputs(vis_dir, split, max_epochs_to_keep)
+
+    def _prune_visualization_outputs(self, vis_dir: Path, split: str, max_epochs: int) -> None:
+        """Remove visualization outputs beyond the configured limit."""
+        pattern = re.compile(rf"{split}_epoch_(\\d+)_")
+        epoch_to_paths: Dict[int, List[Path]] = defaultdict(list)
+
+        for image_path in vis_dir.glob(f"{split}_epoch_*_img_*.png"):
+            match = pattern.search(image_path.name)
+            if not match:
+                continue
+            try:
+                epoch_val = int(match.group(1))
+            except ValueError:
+                continue
+            epoch_to_paths[epoch_val].append(image_path)
+
+        if len(epoch_to_paths) <= max_epochs:
+            return
+
+        for epoch_val in sorted(epoch_to_paths.keys())[:-max_epochs]:
+            for image_path in epoch_to_paths[epoch_val]:
+                try:
+                    image_path.unlink()
+                except FileNotFoundError:
+                    pass
