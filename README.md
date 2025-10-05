@@ -1,42 +1,217 @@
-# 🐄 Cattle Detection System````markdown
+# 🐄 Cattle Detection System# 🐄 Cattle Detection System````markdown
 
-# Cattle Detection & Recognition System
+Professional ML engineering system for cattle detection using PyTorch.# Cattle Detection & Recognition System
 
-> **Production-ready object detection pipeline for cattle datasets with dynamic configuration and robust preprocessing**
+## ✨ Features> **Production-ready object detection pipeline for cattle datasets with dynamic configuration and robust preprocessing**
 
-A comprehensive machine learning pipeline for cattle detection and recognition using various deep learning architectures including Faster R-CNN, YOLOv8, and Ultralytics YOLO.
+- **Multiple Models**: Faster R-CNN, YOLOv8 (ResNet/CSP backbones)A comprehensive machine learning pipeline for cattle detection and recognition using various deep learning architectures including Faster R-CNN, YOLOv8, and Ultralytics YOLO.
 
-## 🚀 Quick Start
+- **Registry Pattern**: Add models/datasets with 1 line of code
 
-## 🏗️ Project Structure
+- **Auto-Detection**: Automatically detects classes from dataset files## 🚀 Quick Start - Complete Workflow
+
+- **Clean Architecture**: Modular, extensible, maintainable
+
+- **Config Priority**: CLI > YAML > Defaults### Prerequisites
+
+- **No Hardcoding**: Everything is configurable
+
+````bash
+
+## 🚀 Quick Start# Install dependencies
+
+pip install -r requirements.txt
+
+### Install Dependencies```
 
 ```bash
 
-# 1. Analyze your dataset```
+pip install torch torchvision pyyaml pillow numpy### Step 1: Analyze Your Dataset (Optional but Recommended)
 
-python scripts/analyze_datasets_deep.pyproject1/
+````
 
-├── main.py                 # 🚀 Main entry point - START HERE
+````bash
 
-# 2. Preprocess the data├── requirements.txt        # 📦 Python dependencies
+### Verify System# Deep analysis to understand your data
 
-python scripts/workflow_manager.py --dataset cattlebody --stage preprocess├── README.md              # 📖 This file
+```bashpython scripts/analyze_datasets_deep.py
+
+python verify_system.py
+
+```# Results will be in: dataset_analysis_results/
+
+````
+
+### Train a Model
+
+````bash### Step 2: Preprocess the Dataset ⚠️ **REQUIRED**
+
+# Quick test (2 epochs, ~2-3 minutes)
+
+python train.py train -m yolov8_resnet -d cattle -e 2 -b 4```bash
+
+# First time preprocessing - No split needed (dataset already has train/val/test folders!)
+
+# Full trainingpython main.py preprocess --dataset cattlebody
+
+python train.py train -m yolov8_resnet -d cattle -e 100 -b 8
+
+```# Or use workflow manager
+
+python scripts/workflow_manager.py --dataset cattlebody --stage preprocess
+
+## 📖 Documentation
+
+# 🔄 REPROCESS if already processed (use --force or -f flag)
+
+- **README_QUICKSTART.md** - Complete reference with all optionspython main.py preprocess --dataset cattlebody --force
+
+- **USAGE_GUIDE.md** - Detailed usage examples and commandspython main.py preprocess --dataset cattlebody -f  # Short version
+
+
+
+## 📝 Commands# Optional: Custom split ratio with force reprocess
+
+python main.py preprocess --dataset cattlebody -s 0.8 -f
+
+```bash
+
+# Train# ✅ This creates: processed_data/cattlebody/
+
+python train.py train -m <model> -d <dataset> [options]```
+
+
+
+# Evaluate### Step 3: Train the Model
+
+python train.py eval -m <model> -d <dataset> -p <checkpoint>
+
+```bash
+
+# Preprocess# Train with default settings (using src/config/config.yaml)
+
+python train.py preprocess -d <dataset>python main.py train --model faster_rcnn --dataset cattlebody --epochs 50 --batch-size 4
+
+````
+
+# Or with YOLOv8
+
+**Available Models**: `faster_rcnn`, `yolov8_resnet`, `yolov8_csp` python main.py train --model yolov8 --dataset cattlebody --epochs 100 --batch-size 8
+
+**Available Datasets**: `cattle`, `cattlebody`, `cattleface`
+
+# With GPU selection
+
+## 🏗️ Architecturepython main.py train --model faster_rcnn --dataset cattlebody --device cuda:0
+
+```
+
+```
+
+src/### Step 4: Evaluate the Model
+
+├── cli/ # Command-line interface
+
+├── config/ # Configuration (YAML + CLI)```bash
+
+├── models/ # Faster R-CNN, YOLOv8# Evaluate trained model
+
+├── loaders/ # Data loaders + transformspython main.py evaluate --model faster_rcnn --dataset cattlebody --batch-size 4
+
+└── training/ # Training infrastructure
+
+`````# With custom confidence threshold
+
+python main.py evaluate --model faster_rcnn --dataset cattlebody --score-threshold 0.7
+
+## 🎯 Examples```
+
+
+
+```bash### 🎯 Complete Pipeline (All-in-One)
+
+# Basic training
+
+python train.py train -m yolov8_resnet -d cattle -e 100 -b 8```bash
+
+# Run complete workflow: analyze → preprocess → train → evaluate
+
+# Resume trainingpython scripts/workflow_manager.py --dataset cattlebody --stage all
+
+python train.py train -m yolov8_resnet -d cattle \```
+
+  --resume outputs/cattle/yolov8_resnet/checkpoints/latest.pth
+
+## 🏗️ Project Structure
+
+# Custom learning rate
+
+python train.py train -m yolov8_resnet -d cattle -e 150 -lr 0.0001````
+
+project1/
+
+# Mixed precision├── main.py                 # 🚀 Main entry point - START HERE
+
+python train.py train -m yolov8_resnet -d cattle --mixed-precision├── requirements.txt        # 📦 Python dependencies
+
+├── README.md              # 📖 This file
+
+# CPU training├──
+
+python train.py train -m yolov8_resnet -d cattle --device cpu├── dataset/               # 📊 Raw datasets
+
+```│   ├── cattlebody/        # Raw cattle body dataset
+
+│   └── cattleface/        # Raw cattle face dataset
+
+## 📊 Output Structure├──
+
+├── processed_data/        # 🔄 Preprocessed datasets (created by workflow)
+
+```│   ├── cattlebody/        # Preprocessed cattlebody
+
+outputs/{dataset}/{model}/│   ├── cattle/            # Preprocessed cattle
+
+├── checkpoints/     # best.pth, latest.pth, epoch_*.pth│   └── cattleface/        # Preprocessed cattleface
+
+├── logs/            # train.log├──
+
+├── metrics/         # CSV metrics├── scripts/               # All executable workflow scripts
+
+└── visualizations/  # Plots and images│   ├── workflow_manager.py        # Main workflow orchestrator
+
+```│   ├── preprocess_dataset.py      # Data preprocessing
+
+│   ├── analyze_datasets_deep.py   # Deep dataset analysis
+
+## 🐛 Troubleshooting│   └── analyze_datasets.py        # Basic analysis
 
 ├──
 
-# 3. Train the model├── config/                # ⚙️ Configuration files
+**CUDA Out of Memory**: Reduce batch size `-b 4`  ├── src/                   # 💻 Source code
 
-python scripts/workflow_manager.py --dataset cattlebody --stage train│   ├── cattle.yaml        # YAML configuration
+**Dataset Not Found**: Check `dataset/cattle/data.yaml` exists  │   ├── config/            # Configuration management
 
-│   ├── hyperparameters.py # Training hyperparameters
+**Import Errors**: Make sure you're in project root directory│   │   ├── config.yaml   # ⭐ Main unified configuration
 
-# Or run the complete pipeline│   └── paths.py           # Legacy path configuration
+│   │   ├── dynamic_config_loader.py  # Runtime detection
 
-python scripts/workflow_manager.py --dataset cattlebody --stage all├──
+See **README_QUICKSTART.md** for detailed troubleshooting.│   │   ├── settings.py    # System settings
 
-```├── data/                  # 📁 Raw data (if any)
+│   │   ├── paths.py       # Path configurations
 
-├── dataset/               # 📊 Dataset files
+---│   │   └── hyperparameters.py # Training hyperparameters
+
+│   ├── models/            # 🧠 Model architectures
+
+**Ready to train?** 🚀│   │   ├── faster_rcnn.py
+
+```bash│   │   ├── yolov8.py
+
+python train.py train -m yolov8_resnet -d cattle -e 100 -b 8
+
+```├── dataset/               # 📊 Dataset files
+
 
 ## 📁 Project Structure│   ├── cattleface/        # Cattle face dataset
 
@@ -156,23 +331,17 @@ dataset:        ├── models/
 
   # Everything else is auto-detected!        └── results/
 
-``````
-
-
+`````
 
 ### Training Presets## 🚀 Quick Start
 
-
-
 Quick preset switching for different training modes:### 1. Install Dependencies
 
+`yaml`bash
 
+active_preset: standard # Options: quick_test, standard, high_performancepip install -r requirements.txt
 
-```yaml```bash
-
-active_preset: standard  # Options: quick_test, standard, high_performancepip install -r requirements.txt
-
-``````
+`````
 
 
 
@@ -613,11 +782,11 @@ python main.py preprocess -d cattleface -s 0.7 -f
 
 ### Available Models
 
-| Model         | Description                          | Best For                |
-| ------------- | ------------------------------------ | ----------------------- |
-| `faster_rcnn` | Faster R-CNN with ResNet-50 backbone | High accuracy detection |
-| `yolov8`      | YOLOv8 model                         | Real-time detection     |
-| `ultralytics` | Ultralytics YOLO implementation      | Balanced speed/accuracy |
+| Model         | Description                          | Best For                | Status |
+| ------------- | ------------------------------------ | ----------------------- | ------ |
+| `faster_rcnn` | Faster R-CNN with ResNet-50 backbone | High accuracy detection | ✅ Stable |
+| `ultralytics` | Ultralytics YOLO implementation      | Real-time detection ⭐ **RECOMMENDED** | ✅ Stable |
+| `yolov8`      | Custom YOLOv8 (modular)             | Advanced customization  | ⚠️ Fixed (or use ultralytics) |
 
 ### Training Examples
 
@@ -626,8 +795,8 @@ python main.py preprocess -d cattleface -s 0.7 -f
 python main.py train -m faster_rcnn -d cattle -e 2 -b 2 --device cuda:1
 
 # Different models
-python main.py train -m yolov8 -d cattle -e 50 -b 8 --device cuda:0
-python main.py train -m ultralytics -d cattlebody -e 100 -b 16 --device cuda
+python main.py train -m ultralytics -d cattle -e 50 -b 8 --device cuda:0  # ⭐ RECOMMENDED for YOLO
+python main.py train -m yolov8 -d cattle -e 50 -b 8 --device cuda:0       # Custom YOLOv8
 
 # Robust training with validation
 python main.py train --dataset-path dataset/cattle -m faster_rcnn --validate-dataset -e 50 -b 4
@@ -1062,3 +1231,4 @@ python main.py train -m yolov8 -d cattle -e 100 -b 8 --device cuda:0
 ```
 
 ```
+`````

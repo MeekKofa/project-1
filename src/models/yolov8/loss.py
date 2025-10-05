@@ -155,6 +155,11 @@ class YOLOv8Loss(nn.Module):
                 torch.ones(pred_boxes.size(0), dtype=torch.bool,
                            device=pred_boxes.device)
 
+        if pred_boxes.numel() == 0:
+            return torch.empty(0, dtype=torch.long, device=gt_boxes.device), \
+                torch.empty(0, dtype=torch.long, device=gt_boxes.device), \
+                torch.empty(0, dtype=torch.bool, device=gt_boxes.device)
+
         # Compute IoU between all predictions and ground truth
         ious = generalized_box_iou(pred_boxes, gt_boxes)  # [N, M]
 
@@ -164,21 +169,43 @@ class YOLOv8Loss(nn.Module):
         # Positive matches: IoU > threshold
         pos_mask = best_ious > threshold
         pos_indices = torch.nonzero(pos_mask, as_tuple=False).squeeze(1)
+        matched_gt_idx: torch.Tensor
 
-        # If no positives, use top-k matches as fallback
-        if pos_indices.numel() == 0:
-            k = min(5, best_ious.numel())
-            if k > 0:
-                topk_values, topk_indices = torch.topk(best_ious, k=k)
-                # Only keep those with IoU > 0
-                valid_mask = topk_values > 0
-                pos_indices = topk_indices[valid_mask]
+        if pos_indices.numel() == 0 and ious.numel() > 0:
+            # Ensure each ground-truth gets at least one matched prediction
+            fallback_matches = {}
+            for gt_idx in range(gt_boxes.size(0)):
+                column = ious[:, gt_idx]
+                if column.numel() == 0:
+                    continue
+                best_pred_idx = torch.argmax(column)
+                iou_value = column[best_pred_idx]
+                key = int(best_pred_idx.item())
+                current = fallback_matches.get(key)
+                if current is None or iou_value > current[1]:
+                    fallback_matches[key] = (gt_idx, iou_value)
 
-        # Negative samples: IoU < 0.5
+            if fallback_matches:
+                pos_indices = torch.tensor(
+                    list(fallback_matches.keys()),
+                    dtype=torch.long,
+                    device=pred_boxes.device,
+                )
+                matched_gt_idx = torch.tensor(
+                    [entry[0] for entry in fallback_matches.values()],
+                    dtype=torch.long,
+                    device=pred_boxes.device,
+                )
+            else:
+                pos_indices = torch.empty(0, dtype=torch.long, device=pred_boxes.device)
+                matched_gt_idx = torch.empty(0, dtype=torch.long, device=pred_boxes.device)
+        else:
+            matched_gt_idx = best_gt_idx[pos_indices]
+
+        # Negative samples: IoU < 0.5 by default
         neg_mask = best_ious < 0.5
-
-        # Matched ground truth indices for positives
-        matched_gt_idx = best_gt_idx[pos_indices]
+        if pos_indices.numel() > 0:
+            neg_mask[pos_indices] = False
 
         return pos_indices, matched_gt_idx, neg_mask
 
@@ -288,7 +315,7 @@ class YOLOv8Loss(nn.Module):
         self,
         predictions: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
         targets: List[Dict[str, torch.Tensor]]
-    ) -> torch.Tensor:
+    ) -> Dict[str, torch.Tensor]:
         """
         Compute total loss.
 
@@ -302,7 +329,10 @@ class YOLOv8Loss(nn.Module):
                 - 'labels': [M_i] ground truth class labels
 
         Returns:
-            Total weighted loss
+            Dictionary of weighted loss components:
+            - 'loss_box'
+            - 'loss_cls'
+            - 'loss_obj'
         """
         box_preds, cls_preds, obj_preds = predictions
         device = box_preds.device
@@ -371,12 +401,21 @@ class YOLOv8Loss(nn.Module):
 
         # Handle edge case: no positives in entire batch
         if total_positives == 0:
-            # Return objectness-only loss or small constant
+            device = box_preds.device
+
             if total_negatives > 0:
-                return self.obj_weight * total_obj_loss / total_negatives
+                loss_obj = self.obj_weight * \
+                    (total_obj_loss / max(total_negatives, 1))
             else:
-                # Return tiny loss connected to predictions for gradient flow
-                return 0.01 * (box_preds.sum() * 0.0 + 1.0)
+                # Maintain gradient flow even with empty targets
+                loss_obj = 0.01 * (box_preds.sum() * 0.0 + 1.0)
+
+            zero = torch.tensor(0.0, device=device)
+            return {
+                'loss_box': zero,
+                'loss_cls': zero,
+                'loss_obj': loss_obj,
+            }
 
         # Normalize and weight losses
         box_loss_normalized = total_box_loss / total_positives
@@ -385,10 +424,12 @@ class YOLOv8Loss(nn.Module):
             max(total_positives + total_negatives, 1)
 
         # Weighted sum
-        total_loss = (
-            self.box_weight * box_loss_normalized +
-            self.cls_weight * cls_loss_normalized +
-            self.obj_weight * obj_loss_normalized
-        )
+        loss_box = self.box_weight * box_loss_normalized
+        loss_cls = self.cls_weight * cls_loss_normalized
+        loss_obj = self.obj_weight * obj_loss_normalized
 
-        return total_loss
+        return {
+            'loss_box': loss_box,
+            'loss_cls': loss_cls,
+            'loss_obj': loss_obj,
+        }

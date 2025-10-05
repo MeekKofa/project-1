@@ -57,6 +57,7 @@ def get_default_config() -> Dict[str, Any]:
         'conf_threshold': 0.25,
         'iou_threshold': 0.45,
         'max_det': 300,
+        'max_proposals': None,
 
         # Training stability
         'gradient_clip': 10.0,

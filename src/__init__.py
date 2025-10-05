@@ -10,24 +10,10 @@ __author__ = "Cattle Detection Team"
 __email__ = "team@cattle-detection.ai"
 
 # Make key components easily accessible
-from .config import (
-    TRAINING_CONFIGS,
-    EVALUATION_CONFIGS,
-    OUTPUT_MODELS_DIR,
-    OUTPUT_LOGS_DIR,
-    OUTPUT_IMAGES_DIR,
-    OUTPUT_RESULTS_DIR,
-    get_config,
-    ensure_output_dirs
-)
+from .config import ConfigManager, get_config, DEFAULTS
 
 __all__ = [
-    "TRAINING_CONFIGS",
-    "EVALUATION_CONFIGS",
-    "OUTPUT_MODELS_DIR",
-    "OUTPUT_LOGS_DIR",
-    "OUTPUT_IMAGES_DIR",
-    "OUTPUT_RESULTS_DIR",
+    "ConfigManager",
     "get_config",
-    "ensure_output_dirs"
+    "DEFAULTS",
 ]
