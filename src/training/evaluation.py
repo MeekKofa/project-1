@@ -10,6 +10,13 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 from torchvision.ops import box_iou, nms
 
+# Import robust post-processing utilities
+try:
+    from src.utils.prediction_postprocessing import robust_postprocess_predictions
+    HAS_ROBUST_POSTPROCESSING = True
+except ImportError:
+    HAS_ROBUST_POSTPROCESSING = False
+
 
 def _compute_average_precision(recall: torch.Tensor, precision: torch.Tensor) -> float:
     """Compute average precision given recall and precision curves."""
@@ -17,14 +24,17 @@ def _compute_average_precision(recall: torch.Tensor, precision: torch.Tensor) ->
         return 0.0
 
     device = recall.device
-    mrec = torch.cat([torch.tensor([0.0], device=device), recall, torch.tensor([1.0], device=device)])
-    mpre = torch.cat([torch.tensor([0.0], device=device), precision, torch.tensor([0.0], device=device)])
+    mrec = torch.cat([torch.tensor([0.0], device=device),
+                     recall, torch.tensor([1.0], device=device)])
+    mpre = torch.cat([torch.tensor([0.0], device=device),
+                     precision, torch.tensor([0.0], device=device)])
 
     for i in range(mpre.size(0) - 1, 0, -1):
         mpre[i - 1] = torch.maximum(mpre[i - 1], mpre[i])
 
     indices = torch.nonzero(mrec[1:] != mrec[:-1]).flatten()
-    ap = torch.sum((mrec[indices + 1] - mrec[indices]) * mpre[indices + 1]).item()
+    ap = torch.sum((mrec[indices + 1] - mrec[indices])
+                   * mpre[indices + 1]).item()
     return ap
 
 
@@ -34,20 +44,60 @@ def postprocess_batch_predictions(
     conf_threshold: float = 0.5,
     nms_iou: float = 0.4,
     max_det: int = 300,
+    use_robust_filtering: bool = True,
 ) -> List[Dict[str, torch.Tensor]]:
-    """Convert raw model outputs into per-image detection dictionaries."""
+    """
+    Convert raw model outputs into per-image detection dictionaries.
+
+    Args:
+        predictions: Model predictions (list of dicts or tuple)
+        image_shapes: List of (height, width) for each image
+        conf_threshold: Confidence threshold for filtering
+        nms_iou: IoU threshold for NMS
+        max_det: Maximum number of detections
+        use_robust_filtering: Use robust post-processing to filter outside/invalid boxes
+
+    Returns:
+        List of prediction dicts with 'boxes', 'scores', 'labels'
+    """
     # Case 1: model already returns list of dicts (e.g., Faster R-CNN)
     if isinstance(predictions, list) and predictions and isinstance(predictions[0], dict):
         processed = []
-        for pred in predictions:
-            boxes = pred.get('boxes', torch.empty((0, 4), device=pred.get('scores', torch.tensor([])).device))
-            scores = pred.get('scores', torch.ones(boxes.size(0), device=boxes.device))
-            labels = pred.get('labels', torch.zeros(boxes.size(0), dtype=torch.int64, device=boxes.device))
-            processed.append({
+        for idx, pred in enumerate(predictions):
+            boxes = pred.get('boxes', torch.empty(
+                (0, 4), device=pred.get('scores', torch.tensor([])).device))
+            scores = pred.get('scores', torch.ones(
+                boxes.size(0), device=boxes.device))
+            labels = pred.get('labels', torch.zeros(
+                boxes.size(0), dtype=torch.int64, device=boxes.device))
+
+            # DEBUG: Ensure scores are properly formatted
+            # Faster R-CNN should already return scores, but verify they exist
+            if scores.numel() > 0 and boxes.numel() > 0:
+                assert scores.numel() == boxes.size(
+                    0), f"Score/box mismatch: {scores.numel()} vs {boxes.size(0)}"
+
+            result = {
                 'boxes': boxes.detach(),
                 'scores': scores.detach(),
                 'labels': labels.detach(),
-            })
+            }
+
+            # Apply robust post-processing if available
+            if use_robust_filtering and HAS_ROBUST_POSTPROCESSING and len(image_shapes) > idx:
+                height, width = image_shapes[idx]
+                result = robust_postprocess_predictions(
+                    result,
+                    image_width=width,
+                    image_height=height,
+                    conf_threshold=conf_threshold,
+                    nms_iou_threshold=nms_iou,
+                    max_detections=max_det,
+                    min_box_size=10,
+                    outside_margin=0.1
+                )
+
+            processed.append(result)
         return processed
 
     # Case 2: tuple output expected from YOLO-like models
@@ -93,7 +143,8 @@ def postprocess_batch_predictions(
             kept_indices = kept_indices[:max_det]
             boxes_list.append(class_boxes[kept_indices])
             scores_list.append(class_scores[kept_indices])
-            labels_list.append(torch.full((kept_indices.numel(),), class_idx, dtype=torch.int64, device=class_boxes.device))
+            labels_list.append(torch.full(
+                (kept_indices.numel(),), class_idx, dtype=torch.int64, device=class_boxes.device))
 
         if boxes_list:
             boxes_out = torch.cat(boxes_list, dim=0)
@@ -153,7 +204,8 @@ class DetectionMetricAccumulator:
 
             # Store per-class data for metrics
             for box, score, label in zip(pred_boxes, pred_scores, pred_labels):
-                self.predictions[label.item()].append((image_id, float(score.item()), box))
+                self.predictions[label.item()].append(
+                    (image_id, float(score.item()), box))
 
             for box, label in zip(gt_boxes, gt_labels):
                 self.ground_truths[label.item()][image_id].append(box)
@@ -179,7 +231,8 @@ class DetectionMetricAccumulator:
         total_gt = 0.0
 
         for class_idx in range(self.num_classes):
-            class_preds = sorted(self.predictions[class_idx], key=lambda x: x[1], reverse=True)
+            class_preds = sorted(
+                self.predictions[class_idx], key=lambda x: x[1], reverse=True)
             gt_dict = self.ground_truths[class_idx]
             gt_count = sum(len(boxes) for boxes in gt_dict.values())
             total_gt += gt_count
@@ -259,9 +312,12 @@ class DetectionMetricAccumulator:
             })
 
         map_50 = float(sum(aps) / len(aps)) if aps else 0.0
-        precision_global = total_tp / (total_tp + total_fp + eps) if (total_tp + total_fp) > 0 else 0.0
+        precision_global = total_tp / \
+            (total_tp + total_fp + eps) if (total_tp + total_fp) > 0 else 0.0
         recall_global = total_tp / (total_gt + eps) if total_gt > 0 else 0.0
-        f1_global = 2 * precision_global * recall_global / (precision_global + recall_global + eps) if (precision_global + recall_global) > 0 else 0.0
+        f1_global = 2 * precision_global * recall_global / \
+            (precision_global + recall_global +
+             eps) if (precision_global + recall_global) > 0 else 0.0
 
         return {
             'map_50': map_50,

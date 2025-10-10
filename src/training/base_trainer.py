@@ -56,7 +56,8 @@ class BaseTrainer(ABC):
         for key, value in evaluation_cfg.items():
             self.validation_config.setdefault(key, value)
         self.validation_config.setdefault('split', 'val')
-        self.validation_config.setdefault('split_name', self.validation_config.get('split', 'val'))
+        self.validation_config.setdefault(
+            'split_name', self.validation_config.get('split', 'val'))
 
         self.visualization_config = config.get('visualization', {})
         self.output_config = config.get('output', {})
@@ -118,7 +119,6 @@ class BaseTrainer(ABC):
             self.logger.info("Using mixed precision training (FP16)")
         else:
             self.scaler = None
-
 
     def _create_optimizer(self) -> torch.optim.Optimizer:
         """
@@ -347,7 +347,8 @@ class BaseTrainer(ABC):
 
         # Save validation metrics
         if self.val_metrics:
-            val_split = self.validation_config.get('split_name', self.validation_config.get('split', 'val'))
+            val_split = self.validation_config.get(
+                'split_name', self.validation_config.get('split', 'val'))
             val_csv = self.metrics_dir / f'{val_split}_metrics.csv'
             with open(val_csv, 'w', newline='') as f:
                 writer = csv.DictWriter(
@@ -384,11 +385,13 @@ class BaseTrainer(ABC):
         try:
             from src.utils.metrics_plotter import MetricsPlotter
         except ImportError:
-            self.logger.warning("matplotlib not available; skipping metric plots")
+            self.logger.warning(
+                "matplotlib not available; skipping metric plots")
             return
 
         plotter = MetricsPlotter(self.metrics_dir / 'plots')
-        plotter.update(self.train_metrics, self.val_metrics, self.epoch_history)
+        plotter.update(self.train_metrics,
+                       self.val_metrics, self.epoch_history)
 
     def _cleanup_epoch_artifacts(self) -> None:
         """Remove legacy per-epoch JSON files so only consolidated outputs remain."""
@@ -411,11 +414,14 @@ class BaseTrainer(ABC):
 
     def _denormalize_image(self, tensor: torch.Tensor) -> Image.Image:
         """Convert normalized tensor image back to PIL image."""
-        mean = torch.tensor([0.485, 0.456, 0.406], device=tensor.device).view(3, 1, 1)
-        std = torch.tensor([0.229, 0.224, 0.225], device=tensor.device).view(3, 1, 1)
+        mean = torch.tensor([0.485, 0.456, 0.406],
+                            device=tensor.device).view(3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225],
+                           device=tensor.device).view(3, 1, 1)
         image = tensor * std + mean
         image = image.clamp(0, 1)
-        image_np = (image.permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+        image_np = (image.permute(1, 2, 0).cpu().numpy()
+                    * 255).astype(np.uint8)
         return Image.fromarray(image_np)
 
     def _draw_box(
@@ -428,31 +434,53 @@ class BaseTrainer(ABC):
         width: int = 2,
     ):
         """Draw a bounding box with optional label text."""
+        # Validate box coordinates
+        if len(box) != 4:
+            self.logger.warning(f"Invalid box format: {box}")
+            return
+
         x1, y1, x2, y2 = box
+
+        # Ensure valid box (x2 > x1, y2 > y1)
+        if x2 <= x1 or y2 <= y1:
+            self.logger.warning(f"Invalid box coordinates: {box}")
+            return
+
         draw.rectangle([x1, y1, x2, y2], outline=outline, width=width)
 
-        label = self.class_names[label_idx] if self.class_names and label_idx < len(self.class_names) else f'class_{label_idx}'
+        # Use actual class name if available, otherwise use ID number (not "class_N")
+        if self.class_names and 0 <= label_idx < len(self.class_names):
+            label = self.class_names[label_idx]
+        else:
+            label = str(label_idx)  # Show just the number: "0", "1", "2"
+
         if score is not None:
             label = f"{label}: {score:.2f}"
 
-        text_bbox = draw.textbbox((0, 0), label)
-        text_width = text_bbox[2] - text_bbox[0]
-        text_height = text_bbox[3] - text_bbox[1]
-        text_origin = (max(x1, 0), max(y1 - text_height - 4, 0))
-        padding = 2
-        draw.rectangle(
-            [
-                text_origin,
-                (text_origin[0] + text_width + 2 * padding,
-                 text_origin[1] + text_height + 2 * padding),
-            ],
-            fill=outline,
-        )
-        draw.text(
-            (text_origin[0] + padding, text_origin[1] + padding),
-            label,
-            fill='white'
-        )
+        # Draw label background and text
+        try:
+            text_bbox = draw.textbbox((0, 0), label)
+            text_width = text_bbox[2] - text_bbox[0]
+            text_height = text_bbox[3] - text_bbox[1]
+            text_origin = (max(x1, 0), max(y1 - text_height - 4, 0))
+            padding = 2
+
+            draw.rectangle(
+                [
+                    text_origin,
+                    (text_origin[0] + text_width + 2 * padding,
+                     text_origin[1] + text_height + 2 * padding),
+                ],
+                fill=outline,
+            )
+            draw.text(
+                (text_origin[0] + padding, text_origin[1] + padding),
+                label,
+                fill='white'
+            )
+        except Exception as e:
+            # If text drawing fails, at least we have the box
+            self.logger.debug(f"Failed to draw label text: {e}")
 
     def _save_visualizations(self, samples: List[Dict[str, Any]], split: str):
         """Persist visualizations for a subset of samples."""
@@ -473,14 +501,17 @@ class BaseTrainer(ABC):
             if configured_epochs and epoch_idx not in configured_epochs:
                 return
         else:
-            save_interval = self.visualization_config.get('save_interval', 1) or 1
+            save_interval = self.visualization_config.get(
+                'save_interval', 1) or 1
             try:
                 save_interval = max(1, int(save_interval))
             except (TypeError, ValueError):
                 save_interval = 1
 
-            always_save_first = self.visualization_config.get('always_save_first', True)
-            always_save_last = self.visualization_config.get('always_save_last', True)
+            always_save_first = self.visualization_config.get(
+                'always_save_first', True)
+            always_save_last = self.visualization_config.get(
+                'always_save_last', True)
 
             should_save = True
             if save_interval > 1 and (epoch_idx % save_interval != 0):
@@ -499,30 +530,69 @@ class BaseTrainer(ABC):
 
         show_gt = self.visualization_config.get('show_ground_truth', True)
         show_preds = self.visualization_config.get('show_predictions', True)
-        pred_conf_threshold = self.visualization_config.get('confidence_threshold', 0.5)
+        pred_conf_threshold = self.visualization_config.get(
+            'confidence_threshold', 0.5)
 
         for idx, sample in enumerate(samples):
-            image = self._denormalize_image(sample['image'])
-            draw = ImageDraw.Draw(image)
+            try:
+                image = self._denormalize_image(sample['image'])
+                draw = ImageDraw.Draw(image)
 
-            if show_gt:
-                gt = sample['target']
-                boxes = gt['boxes']
-                labels = gt['labels']
-                for box, label in zip(boxes, labels):
-                    self._draw_box(draw, box.tolist(), int(label), None, outline='green', width=3)
+                if show_gt:
+                    gt = sample['target']
+                    boxes = gt.get('boxes', torch.empty((0, 4)))
+                    labels = gt.get('labels', torch.empty(
+                        (0,), dtype=torch.int64))
 
-            if show_preds:
-                preds = sample['pred']
-                for box, score, label in zip(preds['boxes'], preds['scores'], preds['labels']):
-                    if score < pred_conf_threshold:
-                        continue
-                    self._draw_box(draw, box.tolist(), int(label), float(score), outline='red', width=2)
+                    # Draw ground truth boxes (green, no scores)
+                    for box, label in zip(boxes, labels):
+                        try:
+                            self._draw_box(draw, box.tolist(), int(
+                                label), None, outline='green', width=3)
+                        except Exception as e:
+                            self.logger.warning(
+                                f"Failed to draw ground truth box: {e}")
+                            continue
 
-            filename = vis_dir / f"{split}_epoch_{self.current_epoch + 1}_img_{sample['image_id']}_{idx}.png"
-            image.save(filename)
+                if show_preds:
+                    preds = sample.get('pred', {})
+                    pred_boxes = preds.get('boxes', torch.empty((0, 4)))
+                    pred_scores = preds.get('scores', torch.empty((0,)))
+                    pred_labels = preds.get(
+                        'labels', torch.empty((0,), dtype=torch.int64))
 
-        max_epochs_to_keep = self.visualization_config.get('max_epochs_to_keep')
+                    # Ensure all tensors have same length
+                    min_len = min(len(pred_boxes), len(
+                        pred_scores), len(pred_labels))
+                    if min_len > 0:
+                        # Draw prediction boxes (red, with scores)
+                        for box, score, label in zip(
+                            pred_boxes[:min_len],
+                            pred_scores[:min_len],
+                            pred_labels[:min_len]
+                        ):
+                            try:
+                                score_val = float(score)
+                                if score_val < pred_conf_threshold:
+                                    continue
+                                self._draw_box(draw, box.tolist(), int(
+                                    label), score_val, outline='red', width=2)
+                            except Exception as e:
+                                self.logger.warning(
+                                    f"Failed to draw prediction box: {e}")
+                                continue
+
+                filename = vis_dir / \
+                    f"{split}_epoch_{self.current_epoch + 1}_img_{sample['image_id']}_{idx}.png"
+                image.save(filename)
+
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to save visualization for sample {idx}: {e}")
+                continue
+
+        max_epochs_to_keep = self.visualization_config.get(
+            'max_epochs_to_keep')
         if max_epochs_to_keep:
             try:
                 max_epochs_to_keep = int(max_epochs_to_keep)
@@ -530,7 +600,8 @@ class BaseTrainer(ABC):
                 max_epochs_to_keep = 0
 
             if max_epochs_to_keep > 0:
-                self._prune_visualization_outputs(vis_dir, split, max_epochs_to_keep)
+                self._prune_visualization_outputs(
+                    vis_dir, split, max_epochs_to_keep)
 
     def _prune_visualization_outputs(self, vis_dir: Path, split: str, max_epochs: int) -> None:
         """Remove visualization outputs beyond the configured limit."""

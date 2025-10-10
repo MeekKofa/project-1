@@ -118,7 +118,7 @@ DEFAULTS = {
         'num_samples': 8,     # Number of samples to visualize
         'show_ground_truth': True,
         'show_predictions': True,
-        'confidence_threshold': 0.5,
+        'confidence_threshold': 0.05,  # from 0.5 ← LOWERED: Match Faster R-CNN capability
         'always_save_first': True,
         'always_save_last': True,
         'max_epochs_to_keep': 5,
