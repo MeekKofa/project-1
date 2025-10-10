@@ -31,8 +31,8 @@ def _compute_average_precision(recall: torch.Tensor, precision: torch.Tensor) ->
 def postprocess_batch_predictions(
     predictions: Any,
     image_shapes: List[Tuple[int, int]],
-    conf_threshold: float = 0.25,
-    nms_iou: float = 0.45,
+    conf_threshold: float = 0.5,
+    nms_iou: float = 0.4,
     max_det: int = 300,
 ) -> List[Dict[str, torch.Tensor]]:
     """Convert raw model outputs into per-image detection dictionaries."""

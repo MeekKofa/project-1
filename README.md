@@ -1433,3 +1433,8 @@ python main.py train -m yolov8 -d cattle -e 100 -b 8 --device cuda:0
 
 ```
 `````
+fusion model train
+
+python -m src.training.train_fusion --batch_size 4 --resume "C:\Users\ASUS\Desktop\project 1\model_checkpoints\cattle_best_model.pth"
+
+python -m src.training.train_fusion --batch_size 4 --resume "/home/john/coding/cattlebiometric/dataset/cattle/cattle_best_model.pth"

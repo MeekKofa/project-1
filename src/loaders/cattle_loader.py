@@ -327,6 +327,18 @@ class CattleDetectionDataset(BaseDetectionLoader):
         """
         image, target = self._load_sample(idx)
 
+        # Guarantee targets are never None or invalid
+        if target is None or not isinstance(target, dict):
+            target = {
+                "boxes": torch.empty((0, 4), dtype=torch.float32),
+                "labels": torch.empty(0, dtype=torch.int64)
+            }
+        else:
+            if "boxes" not in target or not isinstance(target["boxes"], torch.Tensor):
+                target["boxes"] = torch.empty((0, 4), dtype=torch.float32)
+            if "labels" not in target or not isinstance(target["labels"], torch.Tensor):
+                target["labels"] = torch.empty(0, dtype=torch.int64)
+
         # Apply transforms
         if self.transform is not None:
             image, target = self.transform(image, target)

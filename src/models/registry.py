@@ -12,6 +12,12 @@ import torch.nn as nn
 # MODEL REGISTRY - Add new models here
 # ===================================================================
 MODEL_REGISTRY = {
+    'fusion_model': {
+        'module': 'src.models.fusion_model',
+        'class_name': 'AdaptiveFusionDetector',
+        'config_key': 'fusion_model',
+        'description': 'Adaptive Fusion Detector (multi-backbone, multi-scale)',
+    },
     'faster_rcnn': {
         'module': 'src.models.faster_rcnn.model',
         'class_name': 'FasterRCNNModel',

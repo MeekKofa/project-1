@@ -38,7 +38,7 @@ def create_parser() -> argparse.ArgumentParser:
         '-m', '--model',
         type=str,
         required=True,
-        choices=['faster_rcnn', 'yolov8_resnet', 'yolov8_csp'],
+        choices=['faster_rcnn', 'yolov8_resnet', 'yolov8_csp', 'fusion_model'],
         help='Model architecture to train'
     )
 
@@ -174,7 +174,7 @@ def create_parser() -> argparse.ArgumentParser:
         '-m', '--model',
         type=str,
         required=True,
-        choices=['faster_rcnn', 'yolov8_resnet', 'yolov8_csp'],
+        choices=['faster_rcnn', 'yolov8_resnet', 'yolov8_csp', 'fusion_model'],
         help='Model architecture to evaluate'
     )
 
