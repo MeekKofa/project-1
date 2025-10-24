@@ -10,6 +10,7 @@ import logging
 from src.models.registry import get_model, get_model_info
 from src.loaders.registry import get_dataset, get_dataset_info
 from src.config.manager import ConfigManager
+from src.utils.output_paths import resolve_model_artifact_paths
 
 
 class TrainingOrchestrator:
@@ -34,25 +35,20 @@ class TrainingOrchestrator:
         if not self.dataset_name:
             raise ValueError("Dataset name not specified in config")
 
-        # Setup output directory structure
-        self.output_dir = Path(config.get(
-            'output', {}).get('base_dir', 'outputs'))
-        self.output_dir = self.output_dir / self.dataset_name / self.model_name
+        base_dir_override = self.config.get('output', {}).get('base_dir')
+        artifact_paths = resolve_model_artifact_paths(
+            dataset=self.dataset_name,
+            model=self.model_name,
+            base_dir=base_dir_override,
+        )
+
+        self.output_dir = artifact_paths.root
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Create subdirectories
-        self.checkpoint_dir = self.output_dir / 'checkpoints'
-        self.log_dir = self.output_dir / 'logs'
-        self.metrics_dir = self.output_dir / 'metrics'
-        self.viz_dir = self.output_dir / 'visualizations'
-
-        for directory in [self.checkpoint_dir, self.log_dir, self.metrics_dir, self.viz_dir]:
-            directory.mkdir(exist_ok=True)
-
-        # Create visualization subdirectories
-        (self.viz_dir / 'training').mkdir(exist_ok=True)
-        (self.viz_dir / 'evaluation').mkdir(exist_ok=True)
-        (self.viz_dir / 'predictions').mkdir(exist_ok=True)
+        self.checkpoint_dir = artifact_paths.checkpoints
+        self.log_dir = artifact_paths.logs
+        self.metrics_dir = artifact_paths.metrics
+        self.viz_dir = artifact_paths.visualizations
 
         # Setup logging
         self.logger = self._setup_logger()
@@ -104,6 +100,7 @@ class TrainingOrchestrator:
         Returns:
             Configured logger instance
         """
+        self.log_dir.mkdir(parents=True, exist_ok=True)
         log_file = self.log_dir / 'train.log'
 
         # Create logger

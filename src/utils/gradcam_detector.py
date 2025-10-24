@@ -23,15 +23,19 @@ import torch.nn.functional as F
 from torchvision import transforms
 from PIL import Image, ImageOps
 import numpy as np
-import matplotlib.pyplot as plt
+try:
+    import matplotlib.pyplot as plt  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover
+    plt = None
 import os
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 # Ensure project root is on sys.path so `import src` works when running the file directly
 project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
 from src.models.registry import get_model
+from src.utils.output_paths import resolve_model_artifact_paths
 
 
 def find_last_conv(module: torch.nn.Module) -> Tuple[Optional[str], Optional[torch.nn.Module]]:
@@ -157,18 +161,29 @@ def select_target_from_output(output):
     raise RuntimeError('Unrecognized model output format')
 
 
-def overlay_heatmap_on_pil(img_pil: Image.Image, heatmap: np.ndarray, output_path: str, alpha: float = 0.4):
+def overlay_heatmap_on_pil(img_pil: Image.Image, heatmap: np.ndarray, output_path: Path, alpha: float = 0.4):
+    if plt is None:
+        raise RuntimeError('matplotlib is required to render Grad-CAM overlays. Install matplotlib to continue.')
     heatmap_u8 = np.uint8(255 * heatmap)
     cmap = plt.get_cmap('jet')
     colored = cmap(heatmap_u8 / 255.0)[:, :, :3]
     colored = np.uint8(colored * 255)
     colored_img = Image.fromarray(colored).resize(img_pil.size)
     overlay = Image.blend(img_pil, colored_img, alpha=alpha)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     overlay.save(output_path)
     return output_path
 
 
 def load_checkpoint_into_model(model: torch.nn.Module, checkpoint_path: str):
+    ckpt_path = Path(checkpoint_path)
+    if not ckpt_path.exists():
+        attempted = ckpt_path if ckpt_path.is_absolute() else ckpt_path.resolve(strict=False)
+        raise FileNotFoundError(
+            f"Checkpoint not found at '{attempted}'. "
+            "Ensure training produced the expected file or pass an explicit --checkpoint path."
+        )
+
     ckpt = torch.load(checkpoint_path, map_location='cpu')
     if isinstance(ckpt, dict):
         if 'model_state_dict' in ckpt:
@@ -206,7 +221,8 @@ def main():
     parser.add_argument('--layer', default=None, help='Name of conv layer to use (module.path)')
     parser.add_argument('--img-size', type=int, default=640)
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
-    parser.add_argument('--out', default='outputs/gradcam.jpg')
+    parser.add_argument('--dataset', help='Dataset name for output routing (required if --out or --out-dir not absolute)')
+    parser.add_argument('--out', help='Output image path for single-image mode; relative paths resolved under outputs/<dataset>/<model>/visualizations/gradcam')
     parser.add_argument('--alpha', type=float, default=0.4)
     args = parser.parse_args()
 
@@ -214,6 +230,7 @@ def main():
 
     # load config to find nc if present
     nc = 1
+    cfg: Dict[str, Any] = {}
     try:
         with open(args.config, 'r') as f:
             cfg = yaml.safe_load(f)
@@ -242,7 +259,34 @@ def main():
 
     gradcam = GradCAM(model, target_layer)
 
-    def process_single(image_path: str, out_path: str):
+    def resolve_output_path(default_name: str) -> Path:
+        if args.out and Path(args.out).is_absolute():
+            return Path(args.out)
+
+        dataset_name = args.dataset or cfg.get('dataset') or cfg.get('name')
+        if not dataset_name:
+            raise ValueError('Dataset name required to resolve Grad-CAM outputs. Supply --dataset or ensure config includes dataset/name.')
+
+        artifacts = resolve_model_artifact_paths(dataset_name, args.model)
+        gradcam_dir = artifacts.visualizations / 'gradcam'
+        return gradcam_dir / default_name
+
+    def resolve_batch_output_path(input_dir: str, image_path: str) -> Path:
+        if args.out_dir and Path(args.out_dir).is_absolute():
+            base = Path(args.out_dir)
+        else:
+            dataset_name = args.dataset or cfg.get('dataset') or cfg.get('name')
+            if not dataset_name:
+                raise ValueError('Dataset name required for batch Grad-CAM outputs. Supply --dataset or ensure config includes dataset/name.')
+            artifacts = resolve_model_artifact_paths(dataset_name, args.model)
+            base = artifacts.visualizations / 'gradcam'
+            if args.out_dir:
+                base = base / args.out_dir
+
+        rel = os.path.relpath(image_path, input_dir)
+        return Path(base) / rel
+
+    def process_single(image_path: str, out_path: Path):
         img_pil, tensor, _ = load_image(image_path, img_size=args.img_size, device=device)
         model.eval()
 
@@ -278,14 +322,12 @@ def main():
                 score = score.detach().to(device).requires_grad_(True)
 
         cam = gradcam(tensor, score)
-        os.makedirs(os.path.dirname(out_path) or '.', exist_ok=True)
         overlay_heatmap_on_pil(img_pil, cam, out_path, alpha=args.alpha)
         print('Saved Grad-CAM overlay to', out_path)
 
     # Batch mode
     if args.input_dir:
         in_dir = args.input_dir
-        out_dir = args.out_dir or 'outputs/gradcam_batch'
         # collect image files
         exts = {'.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff'}
         files = []
@@ -304,10 +346,7 @@ def main():
             return
 
         for f in sorted(files):
-            rel = os.path.relpath(f, in_dir)
-            out_path = os.path.join(out_dir, rel)
-            # ensure output dir exists
-            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            out_path = resolve_batch_output_path(in_dir, f)
             try:
                 process_single(f, out_path)
             except Exception as e:
@@ -316,7 +355,16 @@ def main():
 
     # Single image mode
     if args.image:
-        process_single(args.image, args.out)
+        if args.out:
+            out_path = Path(args.out)
+            if not out_path.is_absolute():
+                default_name = Path(args.out).name
+                out_path = resolve_output_path(default_name)
+        else:
+            default_name = Path(args.image).stem + '_gradcam.png'
+            out_path = resolve_output_path(default_name)
+
+        process_single(args.image, out_path)
         return
 
     print('Either --image or --input-dir must be provided')

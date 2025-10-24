@@ -2,18 +2,20 @@
 Base Trainer - Template for all model trainers.
 """
 
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
-from pathlib import Path
-from typing import Dict, Any, Optional, List
+import csv
+import math
 import time
+from typing import Any, Dict, Iterable, List, Optional
 from abc import ABC, abstractmethod
+from collections import defaultdict
+from pathlib import Path
 
 import numpy as np
+import torch
+import torch.nn as nn
 from PIL import Image, ImageDraw
+from torch.utils.data import DataLoader
 import re
-from collections import defaultdict
 
 from src.training.checkpoints import CheckpointManager
 
@@ -240,6 +242,7 @@ class BaseTrainer(ABC):
         """
         # Resume from checkpoint if specified
         start_epoch = 0
+        last_completed_epoch = None
         if resume_from:
             checkpoint_info = self.checkpoint_manager.load_checkpoint(
                 Path(resume_from),
@@ -248,8 +251,27 @@ class BaseTrainer(ABC):
                 self.scheduler,
                 str(self.device)
             )
-            start_epoch = checkpoint_info['epoch'] + 1
+            last_completed_epoch = checkpoint_info['epoch']
+            start_epoch = last_completed_epoch + 1
             self.logger.info(f"Resuming training from epoch {start_epoch}")
+
+            # Restore historical metrics so plots cover full training timeline
+            self._load_existing_metrics()
+            self._truncate_history_after_epoch(last_completed_epoch)
+
+            previous_metrics = checkpoint_info.get('metrics', {})
+            previous_best = previous_metrics.get(
+                'val_loss', previous_metrics.get('loss'))
+            if isinstance(previous_best, (int, float)) and math.isfinite(previous_best):
+                self.best_metric = float(previous_best)
+            elif not math.isfinite(self.best_metric):
+                self._refresh_best_metric_from_history()
+        else:
+            self._reset_metrics_storage()
+            # Ensure metric trackers are clean for a fresh run
+            self.train_metrics = []
+            self.val_metrics = []
+            self.epoch_history = []
 
         # Training loop
         self.logger.info(f"Starting training for {self.epochs} epochs")
@@ -332,51 +354,107 @@ class BaseTrainer(ABC):
 
     def _save_metrics_csv(self):
         """Save metrics to CSV files."""
-        import csv
-
         self.metrics_dir.mkdir(parents=True, exist_ok=True)
+
+        self.train_metrics = self._deduplicate_history(self.train_metrics)
+        self.val_metrics = self._deduplicate_history(self.val_metrics)
+        self.epoch_history = self._deduplicate_history(self.epoch_history)
+
+        long_rows: List[Dict[str, Any]] = []
+
+        def collect_fieldnames(rows: Iterable[Dict[str, Any]]) -> List[str]:
+            keys = set()
+            for row in rows:
+                keys.update(row.keys())
+            ordered = []
+            for primary in ('epoch', 'lr'):
+                if primary in keys:
+                    ordered.append(primary)
+                    keys.remove(primary)
+            ordered.extend(sorted(keys))
+            return ordered
+
+        def write_csv(path: Path, rows: List[Dict[str, Any]]) -> None:
+            if not rows:
+                return
+            fieldnames = collect_fieldnames(rows)
+            with open(path, 'w', newline='') as f:
+                writer = csv.DictWriter(
+                    f, fieldnames=fieldnames, extrasaction='ignore')
+                writer.writeheader()
+                for row in rows:
+                    writer.writerow({key: row.get(key, '') for key in fieldnames})
 
         # Save training metrics
         if self.train_metrics:
             train_csv = self.metrics_dir / 'train_metrics.csv'
-            with open(train_csv, 'w', newline='') as f:
-                writer = csv.DictWriter(
-                    f, fieldnames=self.train_metrics[0].keys())
-                writer.writeheader()
-                writer.writerows(self.train_metrics)
+            write_csv(train_csv, self.train_metrics)
+
+            for row in self.train_metrics:
+                epoch = row.get('epoch')
+                if epoch is None:
+                    continue
+                for key, value in row.items():
+                    if key == 'epoch':
+                        continue
+                    long_rows.append({
+                        'epoch': epoch,
+                        'split': 'train',
+                        'metric': key,
+                        'value': value,
+                    })
 
         # Save validation metrics
         if self.val_metrics:
             val_split = self.validation_config.get(
                 'split_name', self.validation_config.get('split', 'val'))
             val_csv = self.metrics_dir / f'{val_split}_metrics.csv'
-            with open(val_csv, 'w', newline='') as f:
-                writer = csv.DictWriter(
-                    f, fieldnames=self.val_metrics[0].keys())
-                writer.writeheader()
-                writer.writerows(self.val_metrics)
+            write_csv(val_csv, self.val_metrics)
+
+            for row in self.val_metrics:
+                epoch = row.get('epoch')
+                if epoch is None:
+                    continue
+                for key, value in row.items():
+                    if key == 'epoch':
+                        continue
+                    long_rows.append({
+                        'epoch': epoch,
+                        'split': val_split,
+                        'metric': key,
+                        'value': value,
+                    })
 
         # Save combined epoch metrics (train + val + lr)
         if self.epoch_history:
             summary_csv = self.metrics_dir / 'metrics_summary.csv'
-            fieldnames = []
-            keys = set()
-            for row in self.epoch_history:
-                keys.update(row.keys())
-
-            if 'epoch' in keys:
-                fieldnames.append('epoch')
-                keys.remove('epoch')
-            if 'lr' in keys:
-                fieldnames.append('lr')
-                keys.remove('lr')
-
-            fieldnames.extend(sorted(keys))
-
+            fieldnames = self._ordered_fieldnames(self.epoch_history)
             with open(summary_csv, 'w', newline='') as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(self.epoch_history)
+
+            for row in self.epoch_history:
+                epoch = row.get('epoch')
+                if epoch is None:
+                    continue
+                lr_value = row.get('lr')
+                if isinstance(lr_value, (int, float)) or lr_value is None:
+                    long_rows.append({
+                        'epoch': epoch,
+                        'split': 'meta',
+                        'metric': 'lr',
+                        'value': lr_value,
+                    })
+
+        # Save long-format metrics for quick analysis
+        if long_rows:
+            long_csv = self.metrics_dir / 'metrics_long.csv'
+            with open(long_csv, 'w', newline='') as f:
+                writer = csv.DictWriter(
+                    f, fieldnames=['epoch', 'split', 'metric', 'value'])
+                writer.writeheader()
+                writer.writerows(long_rows)
 
         self._generate_metric_plots()
 
@@ -407,6 +485,188 @@ class BaseTrainer(ABC):
             for json_file in predictions_dir.glob('val_epoch_*.json'):
                 if json_file.is_file():
                     json_file.unlink()
+
+    # ------------------------------------------------------------------
+    # Metrics persistence helpers
+    # ------------------------------------------------------------------
+
+    def _reset_metrics_storage(self) -> None:
+        """Remove previously generated CSV artifacts when starting a fresh run."""
+        if not self.metrics_dir.exists():
+            return
+
+        split_name = self.validation_config.get('split_name', self.validation_config.get('split', 'val'))
+        files_to_clear = [
+            self.metrics_dir / 'train_metrics.csv',
+            self.metrics_dir / f'{split_name}_metrics.csv',
+            self.metrics_dir / 'metrics_summary.csv',
+            self.metrics_dir / 'metrics_long.csv',
+        ]
+
+        for path in files_to_clear:
+            if path.exists():
+                try:
+                    path.unlink()
+                except OSError as exc:
+                    self.logger.warning(
+                        "Unable to delete stale metrics file %s: %s", path, exc)
+
+        plots_dir = self.metrics_dir / 'plots'
+        if plots_dir.exists():
+            for artifact in plots_dir.glob('*'):
+                if artifact.is_file():
+                    try:
+                        artifact.unlink()
+                    except OSError:
+                        continue
+
+    def _load_existing_metrics(self) -> None:
+        """Load previously saved CSV metrics so plots cover the full history."""
+
+        def read_csv(path: Path) -> List[Dict[str, Any]]:
+            rows: List[Dict[str, Any]] = []
+            if not path.exists():
+                return rows
+            try:
+                with open(path, 'r', newline='') as handle:
+                    reader = csv.DictReader(handle)
+                    for row in reader:
+                        parsed = {
+                            key: self._coerce_metric_value(value)
+                            for key, value in row.items()
+                        }
+                        epoch_val = parsed.get('epoch')
+                        if epoch_val is None:
+                            continue
+                        try:
+                            parsed['epoch'] = int(epoch_val)
+                        except (TypeError, ValueError):
+                            continue
+                        rows.append(parsed)
+            except Exception as exc:  # pragma: no cover - logging path
+                self.logger.warning(
+                    "Failed to load metrics from %s: %s", path, exc)
+            return rows
+
+        split_name = self.validation_config.get('split_name', self.validation_config.get('split', 'val'))
+
+        train_rows = read_csv(self.metrics_dir / 'train_metrics.csv')
+        val_rows = read_csv(self.metrics_dir / f'{split_name}_metrics.csv')
+        summary_rows = read_csv(self.metrics_dir / 'metrics_summary.csv')
+
+        if train_rows:
+            self.train_metrics = self._deduplicate_history(train_rows)
+        if val_rows:
+            self.val_metrics = self._deduplicate_history(val_rows)
+        if summary_rows:
+            self.epoch_history = self._deduplicate_history(summary_rows)
+
+        self._refresh_best_metric_from_history()
+
+    def _truncate_history_after_epoch(self, epoch: int) -> None:
+        """Keep only history entries up to and including the provided epoch."""
+        if epoch is None:
+            return
+
+        def trim(history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            trimmed: List[Dict[str, Any]] = []
+            for row in history:
+                epoch_val = row.get('epoch')
+                if epoch_val is None:
+                    continue
+                try:
+                    epoch_int = int(epoch_val)
+                except (TypeError, ValueError):
+                    continue
+                if epoch_int <= epoch:
+                    trimmed.append({**row, 'epoch': epoch_int})
+            return trimmed
+
+        self.train_metrics = self._deduplicate_history(trim(self.train_metrics))
+        self.val_metrics = self._deduplicate_history(trim(self.val_metrics))
+        self.epoch_history = self._deduplicate_history(trim(self.epoch_history))
+
+        self._refresh_best_metric_from_history()
+
+    @staticmethod
+    def _deduplicate_history(history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Ensure each epoch appears once, keeping the latest record."""
+        dedup: Dict[int, Dict[str, Any]] = {}
+        for row in history:
+            epoch_val = row.get('epoch')
+            if epoch_val is None:
+                continue
+            try:
+                epoch_int = int(epoch_val)
+            except (TypeError, ValueError):
+                continue
+            normalized = {k: v for k, v in row.items() if v is not None}
+            normalized['epoch'] = epoch_int
+            dedup[epoch_int] = normalized
+        return [dedup[epoch] for epoch in sorted(dedup.keys())]
+
+    @staticmethod
+    def _coerce_metric_value(value: Any) -> Any:
+        """Convert CSV string values back to numeric representations when possible."""
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return value
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped == '':
+                return None
+            lowered = stripped.lower()
+            if lowered == 'nan':
+                return float('nan')
+            try:
+                numeric = float(stripped)
+                if numeric.is_integer():
+                    return int(numeric)
+                return numeric
+            except ValueError:
+                return stripped
+        return value
+
+    @staticmethod
+    def _ordered_fieldnames(rows: List[Dict[str, Any]]) -> List[str]:
+        """Create a stable CSV header ordering with epoch first."""
+        if not rows:
+            return []
+
+        keys = set()
+        for row in rows:
+            keys.update(row.keys())
+
+        ordering: List[str] = []
+        for primary in ('epoch', 'lr', 'loss'):
+            if primary in keys:
+                ordering.append(primary)
+                keys.remove(primary)
+
+        ordering.extend(sorted(keys))
+        return ordering
+
+    def _refresh_best_metric_from_history(self) -> None:
+        """Update the cached best metric using loaded history."""
+        best_val = None
+        best_train = None
+
+        for row in self.epoch_history:
+            val_loss = row.get('val_loss')
+            if isinstance(val_loss, (int, float)) and math.isfinite(val_loss):
+                if best_val is None or val_loss < best_val:
+                    best_val = float(val_loss)
+
+            train_loss = row.get('train_loss')
+            if isinstance(train_loss, (int, float)) and math.isfinite(train_loss):
+                if best_train is None or train_loss < best_train:
+                    best_train = float(train_loss)
+
+        if best_val is not None:
+            self.best_metric = best_val
+        elif best_train is not None:
+            self.best_metric = best_train
 
     # ------------------------------------------------------------------
     # Visualization helpers

@@ -75,6 +75,7 @@ All evaluation artifacts land in `outputs/<dataset>/<model>/evaluations/<run_nam
 
 ### 3. Inspect metrics & visualizations
 - Metrics CSV/JSON: `outputs/<dataset>/<model>/metrics/`
+- Long-form snapshot for spreadsheets: `outputs/<dataset>/<model>/metrics/metrics_long.csv`
 - Evaluation exports: `outputs/<dataset>/<model>/evaluations/<run>/metrics/`
 - Detection overlays: `outputs/<dataset>/<model>/visualizations/<split>/`
 - Plots: `outputs/<dataset>/<model>/metrics/plots/`
@@ -104,6 +105,19 @@ Visualization images are generated automatically during validation/testing (conf
 ls outputs/cattle/yolov8_resnet/visualizations/val
 ```
 Adjust `visualization.max_epochs_to_keep` in the config if you want to retain more or fewer epochs.
+
+Need Grad-CAM overlays for a checkpoint? Use the thin wrapper around our standardized detector script so heatmaps land in the right place:
+```bash
+python src/gradcam_visualize.py \
+    --checkpoint outputs/cattle/yolov8_resnet/checkpoints/best.pth \
+    --model yolov8_resnet \
+    --config src/config/cattle.yaml \
+    --dataset cattle \
+    --image processed_data/cattle/val/images/example.jpg
+```
+> Replace the `--checkpoint` path with a file that actually exists on disk (for example, run training first or list files in `outputs/<dataset>/<model>/checkpoints/`).
+
+Grad-CAM results are written to `outputs/<dataset>/<model>/visualizations/gradcam/` (mirroring batch directory layouts when `--input-dir` is provided).
 
 ---
 

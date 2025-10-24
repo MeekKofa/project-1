@@ -1,78 +1,58 @@
-import torch
-import numpy as np
-from torchvision import transforms
-from pytorch_grad_cam import GradCAM
-from pytorch_grad_cam.utils.image import show_cam_on_image
-from pytorch_grad_cam.utils.model_targets import FasterRCNNBoxScoreTarget
-from PIL import Image
-import cv2
-import logging
+"""Standalone Grad-CAM helper that wraps ``src.utils.gradcam_detector``."""
 
-from models.faster_rcnn import create_cattle_detection_model  # your model factory
-
-# ---- Load model ----
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = create_cattle_detection_model(num_classes=2)
-model.load_state_dict(torch.load("C:/Users/ASUS/Desktop/project 1/weights/faster_rcnn.pth", map_location=device))
-#model.load_state_dict(torch.load("weights/faster_rcnn.pth", map_location=device))
-model.to(device).eval()
+import argparse
+import sys
+from pathlib import Path
 
 
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Generate Grad-CAM visualizations via project wrapper")
+    parser.add_argument("--checkpoint", required=True, help="Path to model checkpoint")
+    parser.add_argument("--model", required=True, help="Model name registered in src.models.registry")
+    parser.add_argument("--config", required=True, help="Dataset config YAML")
+    parser.add_argument("--dataset", help="Dataset name used to resolve output paths")
+    parser.add_argument("--image", help="Single image to process")
+    parser.add_argument("--input-dir", help="Directory of images to process (batch mode)")
+    parser.add_argument("--out", help="Output image path for single-image mode")
+    parser.add_argument("--out-dir", help="Output directory for batch mode")
+    parser.add_argument("--det-index", type=int, default=None, help="Detection index to target")
+    parser.add_argument("--layer", help="Specific layer name for Grad-CAM")
+    parser.add_argument("--img-size", type=int, default=640)
+    parser.add_argument("--device", default=None, help="Override device (cpu/cuda)")
+    args = parser.parse_args()
 
-# ---- Load image ----
-image_path = "image_out/2.png"
-img = Image.open(image_path).convert("RGB")
-img = np.array(img).copy()    # fixes negative stride
-img = Image.fromarray(img)    # back to PIL Image
+    project_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(project_root))
 
-img_np = np.array(img)
-img_float = img_np.astype(np.float32) / 255.0
+    from src.utils.gradcam_detector import main as gradcam_main
 
-transform = transforms.Compose([
-    transforms.ToTensor()
-])
-input_tensor = transform(img).unsqueeze(0).to(device)
+    forwarded_args = [
+        "--checkpoint", args.checkpoint,
+        "--model", args.model,
+        "--config", args.config,
+        "--img-size", str(args.img_size),
+    ]
 
-# ---- Run inference ----
-outputs = model(input_tensor)
+    if args.dataset:
+        forwarded_args.extend(["--dataset", args.dataset])
+    if args.image:
+        forwarded_args.extend(["--image", args.image])
+    if args.input_dir:
+        forwarded_args.extend(["--input-dir", args.input_dir])
+    if args.out:
+        forwarded_args.extend(["--out", args.out])
+    if args.out_dir:
+        forwarded_args.extend(["--out-dir", args.out_dir])
+    if args.det_index is not None:
+        forwarded_args.extend(["--det-index", str(args.det_index)])
+    if args.layer:
+        forwarded_args.extend(["--layer", args.layer])
+    if args.device:
+        forwarded_args.extend(["--device", args.device])
 
-# Pick target class (first detection’s label)
-if len(outputs[0]['boxes']) > 0:
-    target_category = outputs[0]['labels'][0].item()
-else:
-    target_category = None
+    sys.argv = ["gradcam_visualize"] + forwarded_args
+    gradcam_main()
 
-# ---- Grad-CAM ----
-def _find_last_conv(module):
-    """Return the last nn.Conv2d module inside `module` or None."""
-    import torch.nn as nn
-    last = None
-    for m in module.modules():
-        if isinstance(m, nn.Conv2d):
-            last = m
-    return last
 
-# Pick a conv layer automatically (robust to different backbone shapes)
-backbone_module = getattr(model, "backbone", None)
-if backbone_module is None:
-    logging.error("Model has no attribute 'backbone' — cannot locate conv layer for GradCAM")
-    raise RuntimeError("No backbone on model")
-
-last_conv = _find_last_conv(backbone_module)
-if last_conv is None:
-    logging.error("Could not find a Conv2d layer in model.backbone; GradCAM requires a conv layer")
-    raise RuntimeError("No Conv2d found in backbone")
-
-target_layers = [last_conv]
-
-# Target: focus Grad-CAM on a specific detection box
-targets = [FasterRCNNBoxScoreTarget(labels=outputs[0]['labels'], bounding_boxes=outputs[0]['boxes'])]
-
-with GradCAM(model=model, target_layers=target_layers) as cam:
-    grayscale_cam = cam(input_tensor=input_tensor, targets=targets)[0, :]
-
-    # Overlay CAM on image
-    cam_image = show_cam_on_image(img_float, grayscale_cam, use_rgb=True)
-
-cv2.imwrite("gradcam/gradcam_output.jpg", cam_image[:, :, ::-1])  # save as BGR for OpenCV
-print("Saved Grad-CAM to gradcam_output.jpg")
+if __name__ == "__main__":
+    main()
