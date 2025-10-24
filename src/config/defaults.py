@@ -35,6 +35,18 @@ DEFAULTS = {
 
     # Model-specific defaults
     'models': {
+        'vgg16_yolov8': {
+            'backbone_type': 'vgg16',
+            'pretrained': True,
+            'config': {
+                'anchor_sizes': ((16, 32, 64, 128, 256),),
+                'anchor_aspect_ratios': ((0.5, 0.75, 1.0, 1.5, 2.0),),
+                'score_threshold': 0.3,
+                'nms_threshold': 0.5,
+                'num_anchors': 3,
+                'num_classes': 1,
+            }
+        },
         'faster_rcnn': {
             'backbone_type': 'resnet50',
             'pretrained': True,

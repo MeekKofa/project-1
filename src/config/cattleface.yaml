@@ -1,0 +1,18 @@
+root_dir: processed_data/cattleface  # dataset root directory
+path: processed_data/cattleface  # dataset root dir (legacy)
+train: train/images     # train images directory
+val: val/images       # validation images directory
+test: val/images      # test images (using validation set for now)
+
+# Number of classes
+nc: 384  # number of classes based on annotation files (0-383)
+
+# Auto-generate class names for all classes
+names: null  # Let the loader auto-detect class names
+
+# Dataset format
+format: yolo  # YOLO format dataset
+annotation_type: txt  # YOLO format annotation files in .txt format
+train_labels: train/labels  # training labels directory
+val_labels: val/labels    # validation labels directory
+test_labels: val/labels   # test labels directory (using validation set for now)

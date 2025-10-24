@@ -1,0 +1,14 @@
+path: dataset/cattle  # dataset root dir
+train: train/images  # train images
+val: val/images     # val images
+test: test/images   # test images
+
+# Number of classes
+nc: 1  # number of classes
+
+# Class names
+names:
+  0: cattle
+
+# Dataset format
+format: yolo  # YOLO format dataset

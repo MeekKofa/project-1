@@ -276,3 +276,15 @@ archive/
 
 # Cleanup scripts
 cleanup.sh
+
+# dataset_backup
+dataset_backup/ 
+
+# scripts
+scripts/
+
+# analysis_output
+analysis_output/
+
+# tran_logs
+tran_logs/

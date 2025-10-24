@@ -4,6 +4,7 @@ Supports train, eval, and preprocess commands.
 """
 
 import argparse
+from src.models.registry import MODEL_REGISTRY
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -38,7 +39,7 @@ def create_parser() -> argparse.ArgumentParser:
         '-m', '--model',
         type=str,
         required=True,
-        choices=['faster_rcnn', 'yolov8_resnet', 'yolov8_csp', 'fusion_model'],
+        choices=list(MODEL_REGISTRY.keys()),
         help='Model architecture to train'
     )
 
@@ -174,7 +175,7 @@ def create_parser() -> argparse.ArgumentParser:
         '-m', '--model',
         type=str,
         required=True,
-        choices=['faster_rcnn', 'yolov8_resnet', 'yolov8_csp', 'fusion_model'],
+        choices=['faster_rcnn', 'yolov8_resnet', 'yolov8_csp', 'fusion_model', 'vgg16_yolov8'],
         help='Model architecture to evaluate'
     )
 

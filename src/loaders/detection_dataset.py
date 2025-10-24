@@ -239,6 +239,11 @@ class DetectionDataset(Dataset):
         label_path = os.path.join(self.labels_dir, label_filename)
         target = self._load_yolo_annotation(
             label_path, orig_width, orig_height)
+        
+        # Add image metadata
+        target['image_id'] = torch.tensor([idx], dtype=torch.int64)  # Use index as image ID
+        target['image_path'] = img_path
+        target['original_size'] = torch.tensor([orig_height, orig_width], dtype=torch.int64)
 
         # Geometric augmentations that require box updates
         if self.augment and self.hflip_prob > 0:

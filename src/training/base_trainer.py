@@ -433,6 +433,7 @@ class BaseTrainer(ABC):
         outline: str,
         width: int = 2,
     ):
+        """Draw a bounding box with label text."""
         """Draw a bounding box with optional label text."""
         # Validate box coordinates
         if len(box) != 4:

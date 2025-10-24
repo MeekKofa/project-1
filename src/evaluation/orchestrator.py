@@ -117,7 +117,32 @@ class EvaluationOrchestrator:
         metrics = trainer.validate(data_loader)
 
         eval_epoch_idx = trainer.current_epoch + 1
-        trainer.val_metrics = [{'epoch': eval_epoch_idx, **metrics}]
+
+        # If there is an existing per-split metrics CSV, preserve its history
+        # and append the new evaluation row so downstream plotters get the
+        # full series instead of a single-point snapshot (which caused the
+        # single-column plot behavior).
+        val_metrics_path = self.metrics_dir / f'{self.split}_metrics.csv'
+        combined_val_metrics = []
+        if val_metrics_path.exists():
+            import csv
+            with open(val_metrics_path, 'r', newline='') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    # keep existing rows as-is (strings); plotting code will
+                    # coerce values to float when extracting metrics
+                    combined_val_metrics.append(row)
+
+        # Append the current evaluation row
+        new_row = {**{'epoch': eval_epoch_idx}, **{k: v for k, v in metrics.items()}}
+        combined_val_metrics.append(new_row)
+
+        trainer.val_metrics = combined_val_metrics
+
+        # Keep epoch_history consistent for summary CSV (we only include the
+        # current evaluation epoch here; metrics_summary.csv will be regenerated
+        # from whatever trainer.epoch_history contains - for evaluation runs we
+        # prefer the single appended entry).
         trainer.epoch_history = [{
             'epoch': eval_epoch_idx,
             'lr': 0.0,

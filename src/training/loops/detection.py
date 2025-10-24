@@ -229,10 +229,19 @@ class DetectionTrainer(BaseTrainer):
                             break
 
                         image_id_tensor = target_cpu.get('image_id')
-                        if isinstance(image_id_tensor, torch.Tensor):
-                            image_id = int(image_id_tensor.flatten()[0].item())
+                        if image_id_tensor is not None:
+                            if isinstance(image_id_tensor, torch.Tensor):
+                                image_id = int(image_id_tensor.flatten()[0].item())
+                            else:
+                                image_id = int(image_id_tensor)
                         else:
-                            image_id = int(image_id_tensor)
+                            # Generate a sequential ID if none provided
+                            image_id = len(visual_samples)
+                            self.logger.warning(
+                                "No image_id found in target during validation. "
+                                "Using sequential ID %d. This may affect visualization ordering.",
+                                image_id
+                            )
 
                         visual_samples.append({
                             'image': img_tensor.detach().cpu(),

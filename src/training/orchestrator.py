@@ -210,8 +210,8 @@ class TrainingOrchestrator:
                 output_dir=self.output_dir,
                 logger=self.logger
             )
-        elif 'yolov8' in self.model_name:
-            # Use DetectionTrainer for YOLOv8
+        elif 'yolov8' in self.model_name or self.model_name == 'vgg16_yolov8':
+            # Use DetectionTrainer for YOLOv8-based models (including VGG16-YOLOv8)
             trainer = DetectionTrainer(
                 model=self.model,
                 config=self.config,

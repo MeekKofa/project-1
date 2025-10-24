@@ -172,7 +172,7 @@ def postprocess_batch_predictions(
 class DetectionMetricAccumulator:
     """Accumulate detection predictions/targets and compute evaluation metrics."""
 
-    def __init__(self, num_classes: int, iou_threshold: float = 0.5) -> None:
+    def __init__(self, num_classes: int, iou_threshold: float = 0.3) -> None:  # Temporarily reduced for early training
         self.num_classes = num_classes
         self.iou_threshold = iou_threshold
         self.predictions: List[List[Tuple[int, float, torch.Tensor]]] = [

@@ -64,37 +64,53 @@ def detect_dataset_info(dataset_name: str) -> Dict[str, Any]:
     """
     info = {}
 
-    # Try data.yaml (YOLO format)
-    yaml_path = Path(f'dataset/{dataset_name}/data.yaml')
-    if yaml_path.exists():
-        with open(yaml_path) as f:
-            data = yaml.safe_load(f) or {}
+    # Try data.yaml (YOLO format) in both dataset and config dirs
+    yaml_paths = [
+        Path(f'dataset/{dataset_name}/data.yaml'),
+        Path(f'src/config/{dataset_name}.yaml')
+    ]
 
-        num_classes = data.get('nc', data.get('num_classes'))
-        class_names = data.get('names') or data.get('class_names')
+    data = None
+    for yaml_path in yaml_paths:
+        if yaml_path.exists():
+            try:
+                with open(yaml_path) as f:
+                    data = yaml.safe_load(f) or {}
+                    
+                if data:
+                    num_classes = data.get('nc', data.get('num_classes'))
+                    class_names = data.get('names') or data.get('class_names')
+                    break  # Successfully loaded data, exit loop
+            except Exception as e:
+                print(f"Error loading {yaml_path}: {e}")
+                continue
+    
+    if data is None:
+        raise ValueError(f"No valid dataset configuration found for {dataset_name}")
+            
+    num_classes = data.get('nc', data.get('num_classes'))
+    class_names = data.get('names') or data.get('class_names')
 
-        if isinstance(class_names, dict):
-            class_names = list(class_names.values())
+    if isinstance(class_names, dict):
+        class_names = list(class_names.values())
 
-        if class_names is None:
-            class_names = []
+    if class_names is None:
+        class_names = []
 
-        if num_classes is not None:
-            info['num_classes'] = int(num_classes)
-            info['class_names'] = class_names
-            info['train_path'] = data.get(
-                'train', f'dataset/{dataset_name}/train')
-            info['val_path'] = data.get('val', f'dataset/{dataset_name}/val')
-            info['test_path'] = data.get(
-                'test', f'dataset/{dataset_name}/test')
-            info['format'] = data.get('format', 'yolo')
-            print(f"✓ Loaded dataset info from {yaml_path}")
-            return info
-        else:
-            print(
-                f"⚠ data.yaml found at {yaml_path} but missing 'nc'/'num_classes'. "
-                "Falling back to other sources..."
-            )
+    if num_classes is not None:
+        info['num_classes'] = int(num_classes)
+        info['class_names'] = class_names
+        info['train_path'] = data.get('train', f'dataset/{dataset_name}/train')
+        info['val_path'] = data.get('val', f'dataset/{dataset_name}/val')
+        info['test_path'] = data.get('test', f'dataset/{dataset_name}/test')
+        info['format'] = data.get('format', 'yolo')
+        print(f"Loaded dataset info from {yaml_path}")
+        return info
+    else:
+        raise ValueError(f"Dataset configuration missing 'nc'/'num_classes' field")
+
+    # Try dataset_info.json (processed data)
+    print("No valid YAML config found. Checking dataset_info.json...")
 
     # Try dataset_info.json (processed data)
     json_path = Path(f'processed_data/{dataset_name}/dataset_info.json')
@@ -119,7 +135,7 @@ def detect_dataset_info(dataset_name: str) -> Dict[str, Any]:
         if num_classes is not None:
             info['num_classes'] = int(num_classes)
             info['class_names'] = class_names
-            print(f"✓ Loaded dataset info from {json_path}")
+            print(f"Loaded dataset info from {json_path}")
             return info
         else:
             print(
@@ -128,7 +144,7 @@ def detect_dataset_info(dataset_name: str) -> Dict[str, Any]:
             )
 
     # Fallback: scan directories
-    print(f"⚠ No data.yaml or dataset_info.json found, scanning directories...")
+    print(f"No data.yaml or dataset_info.json found, scanning directories...")
     info = _scan_dataset_dirs(dataset_name)
 
     return info
@@ -178,12 +194,12 @@ def _scan_dataset_dirs(dataset_name: str) -> Dict[str, Any]:
 
                 info['num_classes'] = len(class_ids)
                 info['class_names'] = [f'class_{i}' for i in sorted(class_ids)]
-                print(f"✓ Detected {info['num_classes']} classes from labels")
+                print(f"Detected {info['num_classes']} classes from labels")
                 return info
 
         break
 
-    print(f"⚠ Could not auto-detect dataset info for '{dataset_name}'")
+    print(f"Could not auto-detect dataset info for '{dataset_name}'")
     print(f"  Please create data.yaml or dataset_info.json")
 
     return info
@@ -214,9 +230,18 @@ def _find_dataset_root(dataset_name: str, info: Dict[str, Any], split: str) -> O
 
     for key in ('train_path', 'val_path', 'test_path'):
         path = info.get(key)
-        if path:
-            p = Path(path)
-            candidates.extend([p, p.parent, p.parent.parent])
+        if not path:
+            continue
+        p = Path(path)
+        # If the path doesn't exist as provided, try interpreting it as
+        # relative to the dataset folder `dataset/{dataset_name}`. Many
+        # YAML files (e.g. Roboflow exports) use paths like 'train/images'
+        # which are intended to be relative to the dataset root.
+        if not p.exists():
+            alt = Path(f'dataset/{dataset_name}') / p
+            if alt.exists():
+                p = alt
+        candidates.extend([p, p.parent, p.parent.parent])
 
     candidates.extend([
         Path(f'processed_data/{dataset_name}'),
@@ -235,6 +260,7 @@ def _find_dataset_root(dataset_name: str, info: Dict[str, Any], split: str) -> O
         if not candidate.exists():
             continue
 
+        # Consider candidate itself, its parent and grandparent as possible roots
         potential_roots = [candidate]
         if candidate.name in {'images', 'labels', split}:
             potential_roots.append(candidate.parent)
@@ -242,18 +268,39 @@ def _find_dataset_root(dataset_name: str, info: Dict[str, Any], split: str) -> O
         else:
             potential_roots.append(candidate.parent)
 
+        # Build split aliases: some YAMLs use 'valid' instead of 'val'
+        split_aliases = {split}
+        if split == 'val':
+            split_aliases.add('valid')
+        if split == 'valid':
+            split_aliases.add('val')
+
         for root in potential_roots:
             if root is None or not isinstance(root, Path):
                 continue
             if not root.exists():
                 continue
 
-            if (root / split / 'images').exists():
-                return root
-            if (root / 'images' / split).exists():
-                return root
-            if (root / split).exists() and (root / split / 'images').exists():
-                return root
+            # 1) Check for conventional layout: root/<split>/images
+            for s in split_aliases:
+                if (root / s / 'images').exists():
+                    return root
+
+            # 2) Check for layout: root/images/<split>
+            for s in split_aliases:
+                if (root / 'images' / s).exists():
+                    return root
+
+            # 3) If info provided explicit paths (train/val/test), check those
+            for key in ('train_path', 'val_path', 'test_path'):
+                cfg_path = info.get(key)
+                if not cfg_path:
+                    continue
+                cfg_p = Path(cfg_path)
+                # If this cfg path is relative, interpret under root
+                cand = cfg_p if cfg_p.is_absolute() else (root / cfg_p)
+                if cand.exists():
+                    return root
 
     return None
 
@@ -288,7 +335,20 @@ def get_dataset(
             f"Available datasets: {available}"
         )
 
+    # Start with the registry entry, then merge any auto-detected info
+    # (from data.yaml or processed dataset_info.json). We avoid mutating
+    # the global registry dict by working on a copy.
     info = DATASET_REGISTRY[dataset_name]
+    try:
+        detected_info = detect_dataset_info(dataset_name)
+        if detected_info:
+            merged = info.copy()
+            merged.update(detected_info)
+            info = merged
+    except Exception as e:
+        # Don't fail here; we'll attempt to infer roots later and raise
+        # a clearer FileNotFoundError if nothing can be located.
+        print(f"⚠ Could not auto-detect dataset info for '{dataset_name}': {e}")
 
     # Import module dynamically
     try:
@@ -357,6 +417,31 @@ def get_dataset(
 
     # Initialize dataset
     try:
+        # If the detected info contains split-specific paths (e.g. 'val_path': 'valid/images'),
+        # translate them to image_dir/annotation_dir relative to the root and pass to dataset.
+        try:
+            root_path = Path(dataset_kwargs.get('root_dir'))
+            cfg_path = info.get(f'{split}_path') or info.get(f"{split}_path")
+            if cfg_path:
+                cfg_p = Path(cfg_path)
+                # image_dir should be the cfg_path relative to root when it's not absolute
+                image_dir_candidate = cfg_p if cfg_p.is_absolute() else Path(cfg_path)
+                # annotation_dir: replace 'images' with 'labels' if present, else sibling 'labels'
+                if 'images' in str(cfg_p):
+                    annotation_dir_candidate = Path(str(cfg_p).replace('images', 'labels'))
+                else:
+                    annotation_dir_candidate = cfg_p.parent / 'labels'
+
+                # Verify existence before attaching
+                img_full = (root_path / image_dir_candidate)
+                ann_full = (root_path / annotation_dir_candidate)
+                if img_full.exists() and ann_full.exists():
+                    dataset_kwargs['image_dir'] = str(image_dir_candidate)
+                    dataset_kwargs['annotation_dir'] = str(annotation_dir_candidate)
+        except Exception:
+            # Non-critical; proceed without explicit image/annotation overrides
+            pass
+
         dataset = dataset_class(
             dataset_name=dataset_name,
             split=split,
@@ -367,7 +452,7 @@ def get_dataset(
             f"Error initializing dataset '{dataset_name}' split '{split}': {e}"
         )
 
-    print(f"✓ Loaded dataset: {dataset_name}/{split}")
+    print(f"Loaded dataset: {dataset_name}/{split}")
     print(f"  - Samples: {len(dataset)}")
 
     return dataset

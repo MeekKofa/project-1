@@ -25,35 +25,141 @@ dataset:
 # MODEL CONFIGURATION
 # ============================================================================
 model:
-  name: yolov8 # Options: yolov8, faster_rcnn
-  pretrained: false
-  freeze_backbone: false
+  name: fusion_model  # Using the fusion model for better performance
+  pretrained: true  # Use pretrained weights
+  freeze_backbone: false  # Allow full model training for better adaptation
+  
+  # Feature Pyramid Network settings
+  fpn:
+    use_p2: true  # Enable P2 level for better small object detection
+    use_p6_p7: true  # Additional levels for large object detection
+    channels: [256, 256, 256, 256, 256]  # Consistent channel size
+
+  # Anchor settings
+  anchors:
+    sizes: [[16, 24, 32], [48, 64, 96], [128, 192, 256]]
+    aspect_ratios: [0.5, 0.75, 1.0, 1.5, 2.0]
+    scales: [1.0, 1.25, 1.5]
+
+# ============================================================================
+# VGG16-YOLOv8 CONFIGURATION
+# ============================================================================
+vgg16_yolov8:
+  # Model architecture
+  backbone:
+    pretrained: true  # Use pretrained VGG16 weights
+    freeze_layers: false  # Allow full backbone training
+    output_indices: [3, 4]  # Use conv4 and conv5 features
+    bn_eps: 1e-5
+    bn_momentum: 0.1
+
+  # Detection head
+  head:
+    num_classes: 2  # Number of classes to detect
+    anchors_per_cell: 3  # Number of anchors per grid cell
+    strides: [8, 16, 32]  # Feature map strides
+    in_channels: [512, 1024, 2048]  # Input channels for each detection level
+
+  # Training specifics
+  training:
+    iou_threshold: 0.5  # IoU threshold for positive samples
+    ignore_threshold: 0.4  # IoU threshold for ignoring anchors
+    anchor_t: 4.0  # Anchor threshold
+    box_loss_weight: 0.05  # Box regression loss weight
+    cls_loss_weight: 0.5  # Classification loss weight
+    obj_loss_weight: 1.0  # Objectness loss weight
+
+  # Inference settings
+  inference:
+    conf_threshold: 0.25  # Confidence threshold for detections
+    nms_threshold: 0.45  # NMS IoU threshold
+    max_detections: 300  # Maximum detections per image
 
 # ============================================================================
 # TRAINING HYPERPARAMETERS
 # ============================================================================
 train:
-  epochs: 100
-  batch_size: 8
-  learning_rate: 0.001
-  weight_decay: 0.0001
-  momentum: 0.9
+  epochs: 200  # Train longer for better convergence
+  batch_size: 8  # Smaller batch size for better generalization
+  learning_rate: 0.0005  # Balanced learning rate
+  warmup_epochs: 5  # Gradual warmup
+  weight_decay: 0.0005
+  momentum: 0.937
 
   # Optimizer
-  optimizer: adamw # Options: sgd, adam, adamw, rmsprop
+  optimizer: adamw
   optimizer_params:
-    betas: [0.9, 0.999]
+    betas: [0.937, 0.999]
     eps: 1.0e-8
 
+  # Loss configuration
+  loss:
+    type: focal  # Use focal loss for better handling of class imbalance
+    focal_alpha: 0.25
+    focal_gamma: 2.0
+    box_loss_weight: 1.0
+    cls_loss_weight: 1.0
+    obj_loss_weight: 1.0
+
 # ============================================================================
-# PREPROCESSING (Applied before training)
+# TRANSFORMS AND DATA AUGMENTATION
 # ============================================================================
+transforms:
+  # Common Settings
+  input_size: 640  # Target image size for model input
+  normalize:
+    mean: [0.485, 0.456, 0.406]
+    std: [0.229, 0.224, 0.225]
+
+  # Training Augmentations
+  train:
+    enabled: true
+    mosaic:
+      enabled: true
+      probability: 0.3
+      min_scale: 0.3
+      max_scale: 0.7
+    random_crop:
+      enabled: true
+      scale_range: [0.8, 1.0]
+    geometry:
+      horizontal_flip: 0.5
+      vertical_flip: 0.2
+      rotate90: 0.2
+    color:
+      brightness: 0.2
+      contrast: 0.2
+      saturation: 0.2
+      hue: 0.1
+    noise:
+      gaussian: 0.2
+      motion_blur: 0.2
+    enhancement:
+      clahe: 0.3
+      sharpen: 0.3
+    box_validation:
+      min_area: 256  # 16*16 pixels - reduced to keep smaller objects
+      min_visibility: 0.2  # Reduced to handle more partial occlusions
+      
+  # Validation/Test Transforms
+  val:
+    enabled: true
+    input_size: 640  # Keep consistent with training size
+    normalize: true
+    multi_scale: true  # Enable multi-scale validation
+    conf_threshold: 0.05  # Lower confidence threshold for better recall
+    nms_iou_threshold: 0.5  # Balanced NMS threshold
+    max_detections: 500  # Increased max detections
+    use_soft_nms: true  # Enable soft-NMS for better overlapping detections
+
 preprocess:
   enabled: true
-  target_size: [640, 640] # Resize all images to this size (640 for standard, 1280 for small objects)
-  maintain_aspect: true # Use letterboxing to maintain aspect ratio
-  normalize: true # Normalize to [0, 1]
-  format: yolo # Output format for preprocessed data
+  target_size: [1280, 1280]  # Increased size for better small object detection
+  maintain_aspect: true  # Use letterboxing to maintain aspect ratio
+  normalize: true  # Normalize to [0, 1]
+  format: yolo  # Output format for preprocessed data
+  min_object_area: 25  # Minimum object area in pixels (5x5)
+  max_objects: 300  # Increased maximum objects per image
 
   # Image quality filters
   min_image_size: [320, 320] # Filter out images smaller than this (detection minimum)
@@ -101,22 +207,31 @@ regularization:
 # LOSS CONFIGURATION
 # ============================================================================
 loss:
-  type: auto # Options: auto, focal, weighted, standard
+  type: weighted # Changed to weighted to handle class imbalance
   # Focal loss params (for class imbalance)
-  focal_alpha: 0.25
-  focal_gamma: 2.0
+  focal_alpha: 0.5  # Increased to give more weight to positive samples
+  focal_gamma: 1.5  # Reduced to make loss less harsh on hard examples
   # Weighted loss (auto-computed from dataset if type=weighted)
   class_weights: auto
+  box_loss_weight: 5.0  # Increased weight on bounding box regression
+  objectness_weight: 1.0  # Weight for objectness predictions
 
 # ============================================================================
 # TRAINING STRATEGY
 # ============================================================================
 strategy:
-  warmup_epochs: 5
+  warmup_epochs: 3  # Reduced warmup for faster adaptation
+  warmup_momentum: 0.8  # Momentum during warmup
+  warmup_bias_lr: 0.1  # Separate learning rate for bias terms during warmup
   scheduler: cosine # Options: cosine, step, multistep, plateau
   early_stopping: true
-  patience: 20
+  patience: 15  # Reduced patience for faster response to stagnation
   mixed_precision: true # Use AMP for faster training
+  ema: true  # Enable EMA for model weights
+  ema_decay: 0.9999  # EMA decay rate
+  anchor_t: 4.0  # Anchor-point threshold
+  anchor_update_interval: 100  # Update anchors every N iterations
+  anchor_update_epochs: 1  # Update anchors for first N epochs
 
 # ============================================================================
 # VALIDATION
@@ -124,8 +239,11 @@ strategy:
 validation:
   interval: 1 # Validate every N epochs
   metric: mAP # Primary metric: mAP, loss, f1
-  iou_threshold: 0.5 # IoU threshold for mAP calculation
-  conf_threshold: 0.25 # Confidence threshold for predictions
+  iou_threshold: 0.3 # IoU threshold for mAP calculation (temporarily reduced for early training)
+  conf_threshold: 0.05  # Lowered to detect more potential objects
+  nms_iou_threshold: 0.65  # Increased to preserve more overlapping detections
+  multi_scale: true  # Enable multi-scale validation
+  use_soft_nms: true  # Use soft-NMS for better recall
 
 # ============================================================================
 # CHECKPOINTING

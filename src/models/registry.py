@@ -12,11 +12,19 @@ import torch.nn as nn
 # MODEL REGISTRY - Add new models here
 # ===================================================================
 MODEL_REGISTRY = {
+    'simplified_detector': {
+        'module': 'src.models.simplified_detector',
+        'class_name': 'SimplifiedDetector',
+        'config_key': 'simplified_detector',
+        'description': 'Optimized single-scale detector with ResNet50 backbone',
+        'skip_config': True  # Don't pass config to constructor
+    },
     'fusion_model': {
-        'module': 'src.models.fusion_model',
-        'class_name': 'AdaptiveFusionDetector',
+        'module': 'src.models.fusion_model_simple',
+        'class_name': 'SimplerAdaptiveFusionDetector',
         'config_key': 'fusion_model',
-        'description': 'Adaptive Fusion Detector (multi-backbone, multi-scale)',
+        'description': 'Adaptive Fusion Detector (simplified version for smoke test)',
+        'skip_config': True  # Don't pass config to constructor
     },
     'faster_rcnn': {
         'module': 'src.models.faster_rcnn.model',
@@ -39,6 +47,16 @@ MODEL_REGISTRY = {
         'init_args': {'backbone_type': 'csp'},
         'config_key': 'yolov8',
         'description': 'YOLOv8 with CSP backbone (default)',
+    },
+    
+    'vgg16_yolov8': {
+        'module': 'src.models.vgg16_yolov8',
+        'class_name': 'VGG16YOLOv8',
+        'config_key': 'vgg16_yolov8',
+        'init_args': {
+            'pretrained': True
+        },
+        'description': 'YOLOv8 with VGG16 backbone for enhanced feature extraction',
     },
 }
 
@@ -98,12 +116,17 @@ def get_model(
     # Get initialization arguments
     init_args = info.get('init_args', {})
 
-    # Merge all args (init_args override config to allow model variants)
+    # Prepare model kwargs
     model_kwargs = {
-        'num_classes': num_classes,
-        **model_config,
-        **init_args  # init_args take precedence over config
+        'num_classes': num_classes
     }
+
+    # Add config if model requires it
+    if not info.get('skip_config', False):
+        model_kwargs['config'] = model_config
+
+    # Add any model-specific init args
+    model_kwargs.update(init_args)
 
     # Initialize model
     try:
